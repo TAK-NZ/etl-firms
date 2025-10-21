@@ -5,7 +5,7 @@ import ETL, { Event, SchemaType, handler as internal, local, DataFlowType, Invoc
 
 const Environment = Type.Object({
     MAP_KEY: Type.String({
-        description: 'NASA FIRMS Map Key from https://firms2.modaps.eosdis.nasa.gov/mapserver/wfs-info/'
+        description: 'NASA FIRMS Map Key from https://firms.modaps.eosdis.nasa.gov/mapserver/wfs-info/'
     }),
     BBOX: Type.String({
         default: '-47.3,166.3,-34.4,178.6',
@@ -45,12 +45,20 @@ export default class Task extends ETL {
 
     private static readonly FIRE_ICON = 'bb4df0a6-ca8d-4ba8-bb9e-3deb97ff015e:Incidents/INC.35.Fire.png';
 
-    private parseCSV(csvText: string): FireData[] {
+    private parseCSV(csvText: string, typename: string): FireData[] {
         const lines = csvText.trim().split('\n');
         if (lines.length < 2) return [];
         
         const headers = lines[0].split(',');
         const fires: FireData[] = [];
+        
+        // Map typename to satellite name
+        const satelliteMap: Record<string, string> = {
+            'ms:fires_modis_24hrs': 'MODIS',
+            'ms:fires_snpp_24hrs': 'VIIRS S-NPP',
+            'ms:fires_noaa20_24hrs': 'VIIRS NOAA-20',
+            'ms:fires_noaa21_24hrs': 'VIIRS NOAA-21'
+        };
         
         for (let i = 1; i < lines.length; i++) {
             const values = lines[i].split(',');
@@ -59,12 +67,24 @@ export default class Task extends ETL {
             const fire: Record<string, string | number> = {};
             headers.forEach((header, index) => {
                 const value = values[index]?.trim();
-                if (['latitude', 'longitude', 'brightness', 'scan', 'track', 'confidence', 'brightness_2', 'frp'].includes(header)) {
+                if (['latitude', 'longitude', 'brightness', 'scan', 'track', 'brightness_2', 'frp'].includes(header)) {
                     fire[header] = parseFloat(value);
+                } else if (header === 'confidence') {
+                    // Handle both numeric (MODIS) and letter (VIIRS) confidence values
+                    const numValue = parseFloat(value);
+                    if (!isNaN(numValue)) {
+                        fire[header] = numValue;
+                    } else {
+                        // Convert letter codes to numeric: h=80, n=60, l=40
+                        fire[header] = value === 'h' ? 80 : value === 'n' ? 60 : value === 'l' ? 40 : 0;
+                    }
                 } else {
                     fire[header] = value;
                 }
             });
+            
+            // Add satellite name from typename
+            fire.satellite = satelliteMap[typename] || typename;
             
             if (!isNaN(fire.latitude as number) && !isNaN(fire.longitude as number)) {
                 fires.push(fire as unknown as FireData);
@@ -100,24 +120,38 @@ export default class Task extends ETL {
     async control(): Promise<void> {
         const env = await this.env(Environment);
 
+        const typenames = [
+            'ms:fires_modis_24hrs',
+            'ms:fires_snpp_24hrs', 
+            'ms:fires_noaa20_24hrs',
+            'ms:fires_noaa21_24hrs'
+        ];
 
+        let allFires: FireData[] = [];
 
-        // Build FIRMS URL with MAP_KEY and BBOX
-        const firmsUrl = new URL(`https://firms2.modaps.eosdis.nasa.gov/mapserver/wfs/Australia_NewZealand/${env.MAP_KEY}/?SERVICE=WFS&REQUEST=GetFeature&VERSION=2.0.0&TYPENAME=ms:fires_modis_24hrs&STARTINDEX=0&COUNT=1000&SRSNAME=urn:ogc:def:crs:EPSG::4326&outputformat=csv`);
-        firmsUrl.searchParams.set('BBOX', `${env.BBOX},urn:ogc:def:crs:EPSG::4326`);
+        // Fetch data from all satellite sources
+        for (const typename of typenames) {
+            try {
+                const firmsUrl = new URL(`https://firms.modaps.eosdis.nasa.gov/mapserver/wfs/Australia_NewZealand/${env.MAP_KEY}/?SERVICE=WFS&REQUEST=GetFeature&VERSION=2.0.0&TYPENAME=${typename}&STARTINDEX=0&COUNT=1000&SRSNAME=urn:ogc:def:crs:EPSG::4326&outputformat=csv`);
+                firmsUrl.searchParams.set('BBOX', `${env.BBOX},urn:ogc:def:crs:EPSG::4326`);
 
-        // Fetch FIRMS data
-        const firmsRes = await fetch(firmsUrl);
-        
-        if (!firmsRes.ok) {
-            throw new Error(`FIRMS API returned ${firmsRes.status}: ${firmsRes.statusText}`);
+                const firmsRes = await fetch(firmsUrl);
+                
+                if (!firmsRes.ok) {
+                    console.warn(`FIRMS API returned ${firmsRes.status} for ${typename}: ${firmsRes.statusText}`);
+                    continue;
+                }
+                
+                const csvText = await firmsRes.text();
+                const fires = this.parseCSV(csvText, typename);
+                allFires = allFires.concat(fires);
+                console.log(`Found ${fires.length} fire detections from ${typename}`);
+            } catch (error) {
+                console.error(`Error fetching ${typename}:`, error);
+            }
         }
-        
-        const csvText = await firmsRes.text();
-        
-        // Parse CSV data
-        const fires = this.parseCSV(csvText);
-        console.log(`Found ${fires.length} fire detections`);
+
+        console.log(`Found ${allFires.length} total fire detections`);
 
         const fc: Static<typeof InputFeatureCollection> = {
             type: 'FeatureCollection',
@@ -125,7 +159,7 @@ export default class Task extends ETL {
         };
 
         // Process each fire detection
-        for (const fire of fires) {
+        for (const fire of allFires) {
             // Filter by minimum confidence and FRP
             if (fire.confidence < env.MIN_CONFIDENCE || fire.frp < env.MIN_FRP) {
                 continue;
@@ -134,20 +168,45 @@ export default class Task extends ETL {
             try {
                 const fireId = `${fire.satellite}_${fire.acq_date}_${fire.acq_time}_${fire.latitude}_${fire.longitude}`;
                 
+                // Parse acquisition datetime properly
+                const timeStr = String(fire.acq_time).padStart(4, '0');
+                const hours = timeStr.slice(0, 2);
+                const minutes = timeStr.slice(2, 4);
+                const acqDateTimeUTC = `${fire.acq_date}T${hours}:${minutes}:00Z`;
+                const acqTime = new Date(acqDateTimeUTC);
+                
+                // Calculate time since detection
+                const now = new Date();
+                const hoursSince = (now.getTime() - acqTime.getTime()) / (1000 * 60 * 60);
+                
+                let timeSinceCategory: string;
+                if (hoursSince < 1) {
+                    timeSinceCategory = '< 1';
+                } else if (hoursSince < 3) {
+                    timeSinceCategory = '1-3';
+                } else if (hoursSince < 6) {
+                    timeSinceCategory = '3-6';
+                } else if (hoursSince < 12) {
+                    timeSinceCategory = '6-12';
+                } else {
+                    timeSinceCategory = '12-24';
+                }
+                
                 const feature = {
                     id: fireId,
                     type: 'Feature' as const,
                     properties: {
                         callsign: `FIRMS Detection - FRP: ${fire.frp}`,
                         type: 'a-f-X-i',
-                        time: new Date(fire.acq_datetime).toISOString(),
-                        start: new Date(fire.acq_datetime).toISOString(),
+                        time: acqTime.toISOString(),
+                        start: acqTime.toISOString(),
                         icon: Task.FIRE_ICON,
                         metadata: {
                             satellite: fire.satellite,
+                            time_since_detection: timeSinceCategory,
                             acq_date: fire.acq_date,
                             acq_time: fire.acq_time,
-                            acq_datetime: fire.acq_datetime,
+                            acq_datetime: acqDateTimeUTC,
                             brightness: fire.brightness,
                             confidence: fire.confidence,
                             brightness_2: fire.brightness_2,
@@ -156,8 +215,10 @@ export default class Task extends ETL {
                             version: fire.version
                         },
                         remarks: [
-                            `Acquisition (UTC): ${fire.acq_datetime}`,
-                            `Acquisition (NZT): ${new Date(fire.acq_datetime).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' })}`,
+                            `Satellite: ${fire.satellite}`,
+                            `Time since detection: ${timeSinceCategory} hours`,
+                            `Acquisition (UTC): ${acqTime.toISOString().replace('T', ' ').replace('Z', '')}`,
+                            `Acquisition (NZT): ${acqTime.toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' })}`,
                             `Confidence: ${fire.confidence}%`,
                             `Brightness temperature: ${fire.brightness}`,
                             `Fire Radiative Power (FRP): ${fire.frp}`
