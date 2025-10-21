@@ -56,7 +56,7 @@ export default class Task extends ETL {
             const values = lines[i].split(',');
             if (values.length !== headers.length) continue;
             
-            const fire: any = {};
+            const fire: Record<string, string | number> = {};
             headers.forEach((header, index) => {
                 const value = values[index]?.trim();
                 if (['latitude', 'longitude', 'brightness', 'scan', 'track', 'confidence', 'brightness_2', 'frp'].includes(header)) {
@@ -66,8 +66,8 @@ export default class Task extends ETL {
                 }
             });
             
-            if (!isNaN(fire.latitude) && !isNaN(fire.longitude)) {
-                fires.push(fire as FireData);
+            if (!isNaN(fire.latitude as number) && !isNaN(fire.longitude as number)) {
+                fires.push(fire as unknown as FireData);
             }
         }
         
