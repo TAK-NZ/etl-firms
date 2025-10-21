@@ -6,7 +6,16 @@
 
 | Data Provider | API Endpoint | Content |
 |---|---|---|
-| NASA FIRMS | https://firms2.modaps.eosdis.nasa.gov/mapserver/wfs/Australia_NewZealand/YourMapKey/ | Active fire detections from MODIS satellite |
+| NASA FIRMS | https://firms.modaps.eosdis.nasa.gov/api/area/csv/YourMapKey/SOURCE/COORDINATES/DAYS | Active fire detections from multiple satellites |
+
+### Data Sources
+
+| Source | Satellite | Processing | Description |
+|---|---|---|---|
+| MODIS_NRT | Terra/Aqua | Near Real-Time | MODIS fire detections with minimal delay |
+| VIIRS_SNPP_NRT | Suomi-NPP | Near Real-Time | VIIRS fire detections from S-NPP satellite |
+| VIIRS_NOAA20_NRT | NOAA-20 | Near Real-Time | VIIRS fire detections from NOAA-20 satellite |
+| VIIRS_NOAA21_NRT | NOAA-21 | Near Real-Time | VIIRS fire detections from NOAA-21 satellite |
 
 ## Example Data
 
@@ -79,9 +88,11 @@ export ETL_API="http://localhost:5001"
 export ETL_LAYER="19"
 export MAP_KEY="your-nasa-firms-map-key"
 export BBOX="-47.3,166.3,-34.4,178.6"
+export MIN_CONFIDENCE="50"
+export MIN_FRP="20"
 ```
 
-Get your NASA FIRMS Map Key from: https://firms2.modaps.eosdis.nasa.gov/mapserver/wfs-info/
+Get your NASA FIRMS Map Key from: https://firms.modaps.eosdis.nasa.gov/api/
 
 To run the task, ensure the local [CloudTAK](https://github.com/TAK-NZ/CloudTAK/) server is running and then run with typescript runtime
 or build to JS and run natively with node
