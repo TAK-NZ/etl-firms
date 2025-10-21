@@ -1,0 +1,28 @@
+{
+    "name": "etl-firms",
+    "type": "module",
+    "prviate": true,
+    "version": "1.0.0",
+    "description": "",
+    "main": "index.js",
+    "scripts": {
+        "lint": "eslint *.ts",
+        "build": "tsc --build",
+        "test": "exit 0"
+    },
+    "author": "Christian Elsen <chris@elsen.nz>",
+    "license": "AGPL-3.0-only",
+    "devDependencies": {
+        "@types/jsonwebtoken": "^9.0.1",
+        "@types/object-hash": "^3.0.6",
+        "eslint": "^9.0.0",
+        "ts-node": "^10.9.1",
+        "typescript": "^5.0.4",
+        "typescript-eslint": "^8.0.0"
+    },
+    "dependencies": {
+        "@sinclair/typebox": "^0.34.0",
+        "@tak-ps/etl": "^9.0.0",
+        "object-hash": "^3.0.0"
+    }
+}

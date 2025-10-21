@@ -1,0 +1,101 @@
+# ETL-FIRMS-NZ
+
+<p align='center'>NASA FIRMS (Fire Information for Resource Management System) wildfire data for New Zealand</p>
+
+## Data Source
+
+| Data Provider | API Endpoint | Content |
+|---|---|---|
+| NASA FIRMS | https://firms2.modaps.eosdis.nasa.gov/mapserver/wfs/Australia_NewZealand/YourMapKey/ | Active fire detections from MODIS satellite |
+
+## Example Data
+
+![NASA FIRMS wildfire data](docs/etl-firms.png)
+
+## Deployment
+
+Deployment into the CloudTAK environment for ETL tasks is done via automatic releases to the TAK.NZ AWS environment.
+
+Github actions will build and push docker releases on every version tag which can then be automatically configured via the
+CloudTAK API.
+
+### GitHub Actions Setup
+
+The workflow uses GitHub variables and secrets to make it reusable across different ETL repositories.
+
+#### Organization Variables (recommended)
+- `DEMO_STACK_NAME`: Name of the demo stack (default: "Demo")
+- `PROD_STACK_NAME`: Name of the production stack (default: "Prod")
+
+#### Organization Secrets (recommended)
+- `DEMO_AWS_ACCOUNT_ID`: AWS account ID for demo environment
+- `DEMO_AWS_REGION`: AWS region for demo environment
+- `DEMO_AWS_ROLE_ARN`: IAM role ARN for demo environment
+- `PROD_AWS_ACCOUNT_ID`: AWS account ID for production environment
+- `PROD_AWS_REGION`: AWS region for production environment
+- `PROD_AWS_ROLE_ARN`: IAM role ARN for production environment
+
+#### Repository Variables
+- `ETL_NAME`: Name of the ETL (default: repository name)
+
+#### Repository Secrets (alternative to organization secrets)
+- `AWS_ACCOUNT_ID`: AWS account ID for the environment
+- `AWS_REGION`: AWS region for the environment
+- `AWS_ROLE_ARN`: IAM role ARN for the environment
+
+These variables and secrets can be set in the GitHub organization or repository settings under Settings > Secrets and variables.
+
+### Manual Deployment
+
+For manual deployment you can use the `scripts/etl/deploy-etl.sh` script from the [CloudTAK](https://github.com/TAK-NZ/CloudTAK/) repo.
+As an example: 
+```
+../CloudTAK/scripts/etl/deploy-etl.sh Demo v1.0.0 --profile tak-nz-demo
+```
+
+### CloudTAK Configuration
+
+When registering this ETL as a task in CloudTAK:
+
+- Use the `<repo-name>.png` file in the main folder of this repository as the Task Logo
+- Use the raw GitHub URL of this README.md file as the Task Markdown Readme URL
+
+This will ensure proper visual identification and documentation for the task in the CloudTAK interface.
+
+## Development
+
+TAK.NZ provided Lambda ETLs are currently all written in [NodeJS](https://nodejs.org/en) through the use of a AWS Lambda optimized
+Docker container. Documentation for the Dockerfile can be found in the [AWS Help Center](https://docs.aws.amazon.com/lambda/latest/dg/images-create.html)
+
+```sh
+npm install
+```
+
+Set the necessary environment variables to communicate with a local ETL server.
+When the ETL is deployed the `ETL_API` and `ETL_LAYER` variables will be provided by the Lambda Environment
+
+```bash
+export ETL_API="http://localhost:5001"
+export ETL_LAYER="19"
+export MAP_KEY="your-nasa-firms-map-key"
+export BBOX="-47.3,166.3,-34.4,178.6"
+```
+
+Get your NASA FIRMS Map Key from: https://firms2.modaps.eosdis.nasa.gov/mapserver/wfs-info/
+
+To run the task, ensure the local [CloudTAK](https://github.com/TAK-NZ/CloudTAK/) server is running and then run with typescript runtime
+or build to JS and run natively with node
+
+```
+ts-node task.ts
+```
+
+```
+npm run build
+node dist/task.js
+```
+
+## License
+
+TAK.NZ is distributed under [AGPL-3.0-only](LICENSE)
+Copyright (C) 2025 - Christian Elsen, Team Awareness Kit New Zealand (TAK.NZ)
