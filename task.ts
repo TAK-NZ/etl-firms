@@ -1,7 +1,7 @@
 
-import { Static, Type, TSchema } from '@sinclair/typebox';
+import { Type, TSchema } from '@sinclair/typebox';
 import { fetch } from '@tak-ps/etl';
-import ETL, { Event, SchemaType, handler as internal, local, DataFlowType, InvocationType, InputFeatureCollection } from '@tak-ps/etl';
+import ETL, { Event, SchemaType, handler as internal, local, DataFlowType, InvocationType } from '@tak-ps/etl';
 
 const Environment = Type.Object({
     MAP_KEY: Type.String({
@@ -161,9 +161,14 @@ export default class Task extends ETL {
 
         console.log(`Found ${allFires.length} total fire detections`);
 
-        const fc: Static<typeof InputFeatureCollection> = {
-            type: 'FeatureCollection',
-            features: []
+        const fc = {
+            type: 'FeatureCollection' as const,
+            features: [] as Array<{
+                id: string;
+                type: 'Feature';
+                properties: Record<string, unknown>;
+                geometry: { type: 'Point'; coordinates: [number, number] };
+            }>
         };
 
         // Process each fire detection
@@ -238,7 +243,7 @@ export default class Task extends ETL {
                     },
                     geometry: {
                         type: 'Point' as const,
-                        coordinates: [fire.longitude, fire.latitude]
+                        coordinates: [fire.longitude, fire.latitude] as [number, number]
                     }
                 };
 

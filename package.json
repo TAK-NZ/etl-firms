@@ -22,7 +22,7 @@
     },
     "dependencies": {
         "@sinclair/typebox": "^0.34.0",
-        "@tak-ps/etl": "^9.0.0",
+        "@tak-ps/etl": "^9.22.0",
         "object-hash": "^3.0.0"
     }
 }
