@@ -3,7 +3,7 @@ import { Type, TSchema } from '@sinclair/typebox';
 import { fetch } from '@tak-ps/etl';
 import ETL, { Event, SchemaType, handler as internal, local, DataFlowType, InvocationType } from '@tak-ps/etl';
 import AdmZip from 'adm-zip';
-import { DOMParser } from 'xmldom';
+import { DOMParser } from '@xmldom/xmldom';
 
 const Environment = Type.Object({
     MAP_KEY: Type.String({
