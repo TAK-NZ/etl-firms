@@ -2,6 +2,8 @@
 import { Type, TSchema } from '@sinclair/typebox';
 import { fetch } from '@tak-ps/etl';
 import ETL, { Event, SchemaType, handler as internal, local, DataFlowType, InvocationType } from '@tak-ps/etl';
+import AdmZip from 'adm-zip';
+import { DOMParser } from 'xmldom';
 
 const Environment = Type.Object({
     MAP_KEY: Type.String({
@@ -45,6 +47,129 @@ export default class Task extends ETL {
 
     private static readonly FIRE_ICON = 'bb4df0a6-ca8d-4ba8-bb9e-3deb97ff015e:Incidents/INC.35.Fire.png';
 
+    private parseKML(kmlContent: string, source: string): FireData[] {
+        const fires: FireData[] = [];
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(kmlContent, 'text/xml');
+        const placemarks = doc.getElementsByTagName('Placemark');
+        
+        const satelliteMap: Record<string, string> = {
+            'MODIS_C6.1': 'MODIS',
+            'VIIRS_SNPP': 'VIIRS S-NPP',
+            'VIIRS_NOAA20': 'VIIRS NOAA-20',
+            'VIIRS_NOAA21': 'VIIRS NOAA-21'
+        };
+        
+        console.log(`Total placemarks in ${source}:`, placemarks.length);
+        let nzCount = 0;
+        
+        for (let i = 0; i < placemarks.length; i++) {
+            const placemark = placemarks[i];
+            const name = placemark.getElementsByTagName('name')[0]?.textContent || '';
+            
+            // Only process centroid points, skip footprint polygons
+            if (!name.includes('Fire Detection Centroid')) continue;
+            
+            const description = placemark.getElementsByTagName('description')[0]?.textContent || '';
+            const coordinates = placemark.getElementsByTagName('coordinates')[0]?.textContent?.trim();
+            
+            if (!coordinates) continue;
+            
+            const [lon, lat] = coordinates.split(',').map(Number);
+            
+            // Filter for New Zealand coordinates
+            if (lon < 166 || lon > 179 || lat < -47 || lat > -34) continue;
+            nzCount++;
+            
+            // Debug: log first few descriptions
+            if (nzCount <= 2) {
+                console.log(`${source} NZ Fire #${nzCount} description sample:`, description.substring(0, 300));
+            }
+            
+            // Extract data from KML description with correct HTML patterns
+            const detectionTimeMatch = description.match(/Detection Time.*?(\d{4}-\d{2}-\d{2})\s+(\d{2}):(\d{2})/);
+            const sensorMatch = description.match(/<b>Sensor: <\/b>\s*([^<]+)/);
+            const confidenceMatch = description.match(/<b>Confidence[^:]*: <\/b>\s*([^<]+)/);
+            const frpMatch = description.match(/<b>FRP: <\/b>\s*([\d.]+)/);
+            const brightnessMatch = description.match(/<b>Brightness: <\/b>\s*([\d.]+)/);
+            const dayNightMatch = description.match(/<b>Day\/Night: <\/b>\s*([^<]+)/);
+            const scanMatch = description.match(/<b>Scan: <\/b>\s*([\d.]+)/);
+            const trackMatch = description.match(/<b>Track: <\/b>\s*([\d.]+)/);
+            
+            if (nzCount <= 2) {
+                console.log(`${source} matches:`, {
+                    time: detectionTimeMatch,
+                    sensor: sensorMatch,
+                    conf: confidenceMatch,
+                    frp: frpMatch,
+                    bright: brightnessMatch
+                });
+            }
+            
+            // Parse detection time
+            let acq_date = new Date().toISOString().split('T')[0];
+            let acq_time = '1200';
+            let acq_datetime = acq_date;
+            
+            if (detectionTimeMatch) {
+                acq_date = detectionTimeMatch[1];
+                acq_time = detectionTimeMatch[2] + detectionTimeMatch[3];
+                acq_datetime = `${acq_date}T${detectionTimeMatch[2]}:${detectionTimeMatch[3]}:00Z`;
+            }
+            
+            // Parse confidence (handle both percentage and text)
+            let confidence = 60;
+            if (confidenceMatch) {
+                const confStr = confidenceMatch[1].trim();
+                if (confStr.includes('%')) {
+                    confidence = parseInt(confStr.replace('%', ''));
+                } else if (confStr.toLowerCase().includes('high')) {
+                    confidence = 80;
+                } else if (confStr.toLowerCase().includes('nominal')) {
+                    confidence = 60;
+                } else if (confStr.toLowerCase().includes('low')) {
+                    confidence = 40;
+                }
+            }
+            
+            // Parse satellite name
+            let satellite = satelliteMap[source] || source;
+            if (sensorMatch) {
+                const sensor = sensorMatch[1].trim();
+                if (sensor.includes('MODIS')) {
+                    satellite = 'MODIS';
+                } else if (sensor.includes('VIIRS')) {
+                    if (sensor.includes('Suomi-NPP')) satellite = 'VIIRS S-NPP';
+                    else if (sensor.includes('NOAA-20')) satellite = 'VIIRS NOAA-20';
+                    else if (sensor.includes('NOAA-21')) satellite = 'VIIRS NOAA-21';
+                    else satellite = 'VIIRS';
+                }
+            }
+            
+            const fire: FireData = {
+                latitude: lat,
+                longitude: lon,
+                satellite: satellite,
+                acq_date: acq_date,
+                acq_time: acq_time,
+                acq_datetime: acq_datetime,
+                scan: scanMatch ? parseFloat(scanMatch[1]) : 0,
+                track: trackMatch ? parseFloat(trackMatch[1]) : 0,
+                version: '2.0',
+                daynight: dayNightMatch ? (dayNightMatch[1].trim().toLowerCase().includes('day') ? 'D' : 'N') : 'D',
+                brightness: brightnessMatch ? parseFloat(brightnessMatch[1]) : 0,
+                brightness_2: brightnessMatch ? parseFloat(brightnessMatch[1]) : 0,
+                confidence: confidence,
+                frp: frpMatch ? parseFloat(frpMatch[1]) : 0
+            };
+            
+            fires.push(fire);
+        }
+        
+        console.log(`NZ coordinates found in ${source}:`, nzCount, `fires parsed:`, fires.length);
+        return fires;
+    }
+    
     private parseCSV(csvText: string, source: string): FireData[] {
         const lines = csvText.trim().split('\n');
         if (lines.length < 2) return [];
@@ -139,7 +264,7 @@ export default class Task extends ETL {
 
         let allFires: FireData[] = [];
 
-        // Fetch data from all satellite sources
+        // Fetch data from CSV API sources
         for (const source of sources) {
             try {
                 const firmsUrl = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${env.MAP_KEY}/${source}/${areaCoords}/1`;
@@ -153,13 +278,60 @@ export default class Task extends ETL {
                 const csvText = await firmsRes.text();
                 const fires = this.parseCSV(csvText, source);
                 allFires = allFires.concat(fires);
-                console.log(`Found ${fires.length} fire detections from ${source}`);
+                console.log(`Found ${fires.length} fire detections from ${source} API`);
             } catch (error) {
-                console.error(`Error fetching ${source}:`, error);
+                console.error(`Error fetching ${source} API:`, error);
             }
         }
+        
+        // Fetch data from KML sources
+        const kmlSources = [
+            { name: 'MODIS_C6.1', url: 'https://firms.modaps.eosdis.nasa.gov/api/kml_fire_footprints/australia_newzealand/24h/c6.1/FirespotArea_australia_newzealand_c6.1_24h.kmz' },
+            { name: 'VIIRS_SNPP', url: 'https://firms.modaps.eosdis.nasa.gov/api/kml_fire_footprints/australia_newzealand/24h/suomi-npp-viirs-c2/FirespotArea_australia_newzealand_suomi-npp-viirs-c2_24h.kmz' },
+            { name: 'VIIRS_NOAA20', url: 'https://firms.modaps.eosdis.nasa.gov/api/kml_fire_footprints/australia_newzealand/24h/noaa-20-viirs-c2/FirespotArea_australia_newzealand_noaa-20-viirs-c2_24h.kmz' },
+            { name: 'VIIRS_NOAA21', url: 'https://firms.modaps.eosdis.nasa.gov/api/kml_fire_footprints/australia_newzealand/24h/noaa-21-viirs-c2/FirespotArea_australia_newzealand_noaa-21-viirs-c2_24h.kmz' }
+        ];
+        
+        for (const kmlSource of kmlSources) {
+            try {
+                const kmlRes = await fetch(kmlSource.url);
+                
+                if (!kmlRes.ok) {
+                    console.warn(`KML API returned ${kmlRes.status} for ${kmlSource.name}: ${kmlRes.statusText}`);
+                    continue;
+                }
+                
+                const kmzBuffer = await kmlRes.arrayBuffer();
+                const zip = new (AdmZip as unknown as new (buffer: Buffer) => AdmZip)(Buffer.from(kmzBuffer));
+                const entries = zip.getEntries();
+                
+                console.log(`KMZ entries for ${kmlSource.name}:`, entries.map(e => e.entryName));
+                for (const entry of entries) {
+                    if (entry.entryName.endsWith('.kml')) {
+                        const kmlContent = entry.getData().toString('utf8');
+                        console.log(`KML content length for ${kmlSource.name}:`, kmlContent.length);
+                        const fires = this.parseKML(kmlContent, kmlSource.name);
+                        allFires = allFires.concat(fires);
+                        console.log(`Found ${fires.length} fire detections from ${kmlSource.name} KML`);
+                        break;
+                    }
+                }
+            } catch (error) {
+                console.error(`Error fetching ${kmlSource.name} KML:`, error);
+            }
+        }
+        
+        // Deduplicate fires based on coordinates and time
+        const uniqueFires = new Map<string, FireData>();
+        for (const fire of allFires) {
+            const key = `${fire.latitude.toFixed(5)}_${fire.longitude.toFixed(5)}_${fire.acq_date}_${fire.acq_time}`;
+            if (!uniqueFires.has(key)) {
+                uniqueFires.set(key, fire);
+            }
+        }
+        allFires = Array.from(uniqueFires.values());
 
-        console.log(`Found ${allFires.length} total fire detections`);
+        console.log(`Found ${allFires.length} total fire detections after deduplication`);
 
         const fc = {
             type: 'FeatureCollection' as const,
