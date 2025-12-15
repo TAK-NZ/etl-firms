@@ -81,12 +81,7 @@ export default class Task extends ETL {
             if (lon < 166 || lon > 179 || lat < -47 || lat > -34) continue;
             nzCount++;
             
-            // Debug: log first few descriptions
-            if (nzCount <= 2) {
-                console.log(`${source} NZ Fire #${nzCount} description sample:`, description.substring(0, 300));
-            }
-            
-            // Extract data from KML description with correct HTML patterns
+            // Extract data from KML description
             const detectionTimeMatch = description.match(/Detection Time.*?(\d{4}-\d{2}-\d{2})\s+(\d{2}):(\d{2})/);
             const sensorMatch = description.match(/<b>Sensor: <\/b>\s*([^<]+)/);
             const confidenceMatch = description.match(/<b>Confidence[^:]*: <\/b>\s*([^<]+)/);
@@ -95,16 +90,6 @@ export default class Task extends ETL {
             const dayNightMatch = description.match(/<b>Day\/Night: <\/b>\s*([^<]+)/);
             const scanMatch = description.match(/<b>Scan: <\/b>\s*([\d.]+)/);
             const trackMatch = description.match(/<b>Track: <\/b>\s*([\d.]+)/);
-            
-            if (nzCount <= 2) {
-                console.log(`${source} matches:`, {
-                    time: detectionTimeMatch,
-                    sensor: sensorMatch,
-                    conf: confidenceMatch,
-                    frp: frpMatch,
-                    bright: brightnessMatch
-                });
-            }
             
             // Parse detection time
             let acq_date = new Date().toISOString().split('T')[0];
@@ -321,14 +306,23 @@ export default class Task extends ETL {
             }
         }
         
-        // Deduplicate fires based on coordinates and time
+        // Deduplicate fires based on coordinates and time (use 3 decimal places for coordinate matching)
         const uniqueFires = new Map<string, FireData>();
+        let duplicatesFound = 0;
         for (const fire of allFires) {
-            const key = `${fire.latitude.toFixed(5)}_${fire.longitude.toFixed(5)}_${fire.acq_date}_${fire.acq_time}`;
+            const key = `${fire.latitude.toFixed(3)}_${fire.longitude.toFixed(3)}_${fire.acq_date}_${String(fire.acq_time).padStart(4, '0')}`;
             if (!uniqueFires.has(key)) {
                 uniqueFires.set(key, fire);
+            } else {
+                duplicatesFound++;
+                // Keep the fire with higher confidence if duplicate found
+                const existing = uniqueFires.get(key)!;
+                if (fire.confidence > existing.confidence) {
+                    uniqueFires.set(key, fire);
+                }
             }
         }
+        console.log(`Removed ${duplicatesFound} duplicate detections`);
         allFires = Array.from(uniqueFires.values());
 
         console.log(`Found ${allFires.length} total fire detections after deduplication`);
@@ -343,6 +337,8 @@ export default class Task extends ETL {
             }>
         };
 
+        const processedFeatures = new Map<string, any>();
+
         // Process each fire detection
         for (const fire of allFires) {
             // Filter by minimum confidence and FRP
@@ -351,7 +347,12 @@ export default class Task extends ETL {
             }
             
             try {
-                const fireId = `${fire.satellite}_${fire.acq_date}_${fire.acq_time}_${fire.latitude}_${fire.longitude}`;
+                const fireId = `${fire.satellite}_${fire.acq_date}_${String(fire.acq_time).padStart(4, '0')}_${fire.latitude.toFixed(3)}_${fire.longitude.toFixed(3)}`;
+                
+                // Skip if we've already processed this exact fire
+                if (processedFeatures.has(fireId)) {
+                    continue;
+                }
                 
                 // Parse acquisition datetime properly
                 const timeStr = String(fire.acq_time).padStart(4, '0');
@@ -419,6 +420,7 @@ export default class Task extends ETL {
                     }
                 };
 
+                processedFeatures.set(fireId, feature);
                 fc.features.push(feature);
             } catch (error) {
                 console.error(`Error processing fire detection:`, error);
