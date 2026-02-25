@@ -40,4 +40,4 @@ jobs:
         run: npm test
         
       - name: Security audit
-        run: npm audit --production
+        run: npm audit --omit=dev
