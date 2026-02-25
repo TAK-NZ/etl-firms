@@ -20,7 +20,27 @@ const Environment = Type.Object({
     MIN_FRP: Type.Number({
         default: 20,
         description: 'Minimum Fire Radiative Power (MW) for fire detections'
+    }),
+    SHOW_FOOTPRINT: Type.Boolean({
+        default: false,
+        description: 'Show fire pixel footprint as a square (375m for VIIRS, 1km for MODIS)'
     })
+});
+
+const FireDetectionSchema = Type.Object({
+    satellite: Type.String({ description: 'Satellite name (MODIS, VIIRS S-NPP, VIIRS NOAA-20, VIIRS NOAA-21)' }),
+    time_since_detection: Type.String({ description: 'Time since detection in hours (< 1, 1-3, 3-6, 6-12, 12-24)' }),
+    acq_date: Type.String({ description: 'Acquisition date (YYYY-MM-DD)' }),
+    acq_time: Type.String({ description: 'Acquisition time (HHMM)' }),
+    acq_datetime: Type.String({ description: 'Acquisition datetime (ISO 8601)' }),
+    brightness: Type.Number({ description: 'Brightness temperature (Kelvin)' }),
+    confidence: Type.Number({ description: 'Confidence percentage (0-100)' }),
+    brightness_2: Type.Number({ description: 'Secondary brightness temperature (Kelvin)' }),
+    frp: Type.Number({ description: 'Fire Radiative Power (MW)' }),
+    daynight: Type.String({ description: 'Day or Night detection (D/N)' }),
+    version: Type.String({ description: 'Data version' }),
+    latitude: Type.Number({ description: 'Latitude' }),
+    longitude: Type.Number({ description: 'Longitude' })
 });
 
 interface FireData {
@@ -46,6 +66,21 @@ export default class Task extends ETL {
     static invocation = [ InvocationType.Schedule ];
 
     private static readonly FIRE_ICON = 'bb4df0a6-ca8d-4ba8-bb9e-3deb97ff015e:Incidents/INC.35.Fire.png';
+
+    private createFootprintPolygon(lat: number, lon: number, pixelSize: number): [number, number][] {
+        // Convert pixel size from meters to degrees (approximate)
+        const metersPerDegree = 111320; // at equator
+        const halfSize = (pixelSize / 2) / metersPerDegree;
+        const halfSizeLon = halfSize / Math.cos(lat * Math.PI / 180);
+
+        return [
+            [lon - halfSizeLon, lat - halfSize],
+            [lon + halfSizeLon, lat - halfSize],
+            [lon + halfSizeLon, lat + halfSize],
+            [lon - halfSizeLon, lat + halfSize],
+            [lon - halfSizeLon, lat - halfSize]
+        ];
+    }
 
     private parseKML(kmlContent: string, source: string): FireData[] {
         const fires: FireData[] = [];
@@ -224,12 +259,12 @@ export default class Task extends ETL {
     ): Promise<TSchema> {
         if (flow === DataFlowType.Incoming) {
             if (type === SchemaType.Input) {
-                return Environment
+                return Environment;
             } else {
-                return Type.Object({})
+                return FireDetectionSchema;
             }
         } else {
-            return Type.Object({})
+            return Type.Object({});
         }
     }
 
@@ -333,7 +368,7 @@ export default class Task extends ETL {
                 id: string;
                 type: 'Feature';
                 properties: Record<string, unknown>;
-                geometry: { type: 'Point'; coordinates: [number, number] };
+                geometry: { type: 'Point'; coordinates: [number, number] } | { type: 'Polygon'; coordinates: [number, number][][] };
             }>
         };
 
@@ -381,6 +416,16 @@ export default class Task extends ETL {
                     timeSinceCategory = '12-24';
                 }
                 
+                const remarks = [
+                    `Satellite: ${fire.satellite}`,
+                    `Time since detection: ${timeSinceCategory} hours`,
+                    `Acquisition (UTC): ${acqTime.toISOString().replace('T', ' ').replace('Z', '')}`,
+                    `Acquisition (NZT): ${acqTime.toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' })}`,
+                    `Confidence: ${fire.confidence}%`,
+                    `Brightness temperature: ${fire.brightness}`,
+                    `Fire Radiative Power (FRP): ${fire.frp}`
+                ].join('\n');
+                
                 const feature = {
                     id: fireId,
                     type: 'Feature' as const,
@@ -403,15 +448,7 @@ export default class Task extends ETL {
                             daynight: fire.daynight,
                             version: fire.version
                         },
-                        remarks: [
-                            `Satellite: ${fire.satellite}`,
-                            `Time since detection: ${timeSinceCategory} hours`,
-                            `Acquisition (UTC): ${acqTime.toISOString().replace('T', ' ').replace('Z', '')}`,
-                            `Acquisition (NZT): ${acqTime.toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' })}`,
-                            `Confidence: ${fire.confidence}%`,
-                            `Brightness temperature: ${fire.brightness}`,
-                            `Fire Radiative Power (FRP): ${fire.frp}`
-                        ].join('\n'),
+                        remarks: remarks,
                         archived: false
                     },
                     geometry: {
@@ -422,6 +459,33 @@ export default class Task extends ETL {
 
                 processedFeatures.set(fireId, feature);
                 fc.features.push(feature);
+
+                // Add footprint polygon if enabled
+                if (env.SHOW_FOOTPRINT) {
+                    const pixelSize = fire.satellite.includes('VIIRS') ? 375 : 1000;
+                    const footprintFeature = {
+                        id: `${fireId}_footprint`,
+                        type: 'Feature' as const,
+                        properties: {
+                            callsign: `FIRMS Footprint - ${fire.satellite}`,
+                            type: 'u-d-f',
+                            time: acqTime.toISOString(),
+                            start: acqTime.toISOString(),
+                            metadata: {
+                                satellite: fire.satellite,
+                                pixel_size: pixelSize,
+                                parent_id: fireId
+                            },
+                            remarks: remarks,
+                            archived: false
+                        },
+                        geometry: {
+                            type: 'Polygon' as const,
+                            coordinates: [this.createFootprintPolygon(fire.latitude, fire.longitude, pixelSize)]
+                        }
+                    };
+                    fc.features.push(footprintFeature);
+                }
             } catch (error) {
                 console.error(`Error processing fire detection:`, error);
             }

@@ -90,6 +90,7 @@ export MAP_KEY="your-nasa-firms-map-key"
 export BBOX="-47.3,166.3,-34.4,178.6"
 export MIN_CONFIDENCE="50"
 export MIN_FRP="20"
+export SHOW_FOOTPRINT="false"
 ```
 
 Get your NASA FIRMS Map Key from: https://firms.modaps.eosdis.nasa.gov/api/
