@@ -337,7 +337,7 @@ export default class Task extends ETL {
             }>
         };
 
-        const processedFeatures = new Map<string, any>();
+        const processedFeatures = new Map<string, typeof fc.features[number]>();
 
         // Process each fire detection
         for (const fire of allFires) {
