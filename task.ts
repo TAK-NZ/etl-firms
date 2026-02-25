@@ -473,6 +473,16 @@ export default class Task extends ETL {
                             start: acqTime.toISOString(),
                             metadata: {
                                 satellite: fire.satellite,
+                                time_since_detection: timeSinceCategory,
+                                acq_date: fire.acq_date,
+                                acq_time: fire.acq_time,
+                                acq_datetime: acqDateTimeUTC,
+                                brightness: fire.brightness,
+                                confidence: fire.confidence,
+                                brightness_2: brightness2,
+                                frp: fire.frp,
+                                daynight: fire.daynight,
+                                version: fire.version,
                                 pixel_size: pixelSize,
                                 parent_id: fireId
                             },
