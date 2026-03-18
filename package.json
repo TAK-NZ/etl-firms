@@ -14,17 +14,17 @@
     "license": "AGPL-3.0-only",
     "devDependencies": {
         "@eslint/js": "^10.0.1",
-        "@types/adm-zip": "^0.5.7",
+        "@types/adm-zip": "^0.5.8",
         "@types/jsonwebtoken": "^9.0.10",
         "@types/object-hash": "^3.0.6",
-        "eslint": "^10.0.2",
+        "eslint": "^10.0.3",
         "ts-node": "^10.9.2",
         "typescript": "^5.9.3",
-        "typescript-eslint": "^8.56.1"
+        "typescript-eslint": "^8.57.1"
     },
     "dependencies": {
         "@sinclair/typebox": "^0.34.48",
-        "@tak-ps/etl": "^10.0.3",
+        "@tak-ps/etl": "^10.4.0",
         "@xmldom/xmldom": "^0.8.11",
         "adm-zip": "^0.5.16",
         "object-hash": "^3.0.0"
