@@ -80,6 +80,7 @@ const LAND_COVER_RISK: Record<string, RiskLevel> = {
     'Short-rotation Cropland': 'Low-Grass',
     'Orchard Vineyard and Other Perennial Crops': 'Low-Grass',
     'Gorse and/or Broom': 'Low-Scrub',
+    'Forest - Harvested': 'Low-Grass',
     'Built-up Area (settlement)': 'Ignore',
     'Urban Parkland/Open Space': 'Ignore',
     'Transport Infrastructure': 'Ignore',

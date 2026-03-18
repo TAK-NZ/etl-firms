@@ -132,7 +132,7 @@ export ETL_LAYER="19"
 export MAP_KEY="your-nasa-firms-map-key"
 export BBOX="-47.3,166.3,-34.4,178.6"
 export MIN_CONFIDENCE="40"
-export MIN_FRP="5"
+export MIN_FRP="10"
 export SHOW_FOOTPRINT="false"
 export LAND_COVER_MASKING="true"
 export LRIS_API_KEY="your-lris-api-key"
@@ -151,7 +151,7 @@ Get your LRIS API Key (free) from: https://lris.scinfo.org.nz/ (requires access 
 | `MAP_KEY` | — | — | NASA FIRMS Map Key (required) |
 | `BBOX` | `-47.3,166.3,-34.4,178.6` | (default) | Bounding box: minLat,minLon,maxLat,maxLon |
 | `MIN_CONFIDENCE` | `50` | `40` | Minimum confidence %. Lower to include borderline detections that clustering can validate. |
-| `MIN_FRP` | `20` | `5` | Minimum FRP (MW). Set low and let land cover thresholds handle filtering per risk level. |
+| `MIN_FRP` | `20` | `10` | Minimum FRP (MW). Set low and let land cover thresholds handle filtering per risk level. At 5 MW too many post-harvest forestry burns pass through. |
 | `SHOW_FOOTPRINT` | `false` | `false` | Show fire pixel footprint polygon on map |
 | `LAND_COVER_MASKING` | `false` | `true` | Enable LCDB v6.0 land cover classification. Requires `LRIS_API_KEY`. |
 | `LRIS_API_KEY` | — | — | LRIS API key for land cover lookups. Free at https://lris.scinfo.org.nz/ |
