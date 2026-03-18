@@ -68,7 +68,7 @@ const LAND_COVER_RISK: Record<string, RiskLevel> = {
     'Indigenous Forest': 'Critical',
     'Exotic Forest': 'Critical',
     'Broadleaved Indigenous Hardwoods': 'High',
-    'Deciduous Hardwoods': 'High',
+    'Deciduous Hardwoods': 'Medium',
     'Manuka and/or Kanuka': 'Medium',
     'Matagouri or Grey Scrub': 'Medium',
     'Sub Alpine Shrubland': 'Medium',
