@@ -164,28 +164,10 @@ const FireDetectionSchema = Type.Object({
     version: Type.String({ description: 'Data version' }),
     latitude: Type.Number({ description: 'Latitude' }),
     longitude: Type.Number({ description: 'Longitude' }),
-    land_cover: Type.Optional(Type.Object({
-        primary_class: Type.String({ description: 'Highest-risk LCDB v6.0 land cover class name' }),
-        primary_class_id: Type.Number({ description: 'LCDB v6.0 class ID' }),
-        risk_level: Type.String({ description: 'Risk level (Critical, High, Medium, Low-Grass, Low-Scrub, Ignore, Pass-through)' }),
-        all_classes: Type.Array(Type.Object({
-            name: Type.String(),
-            class_id: Type.Number(),
-            risk: Type.String()
-        }), { description: 'All intersecting land cover classes' })
-    }, { description: 'LCDB v6.0 land cover classification (when LAND_COVER_MASKING is enabled)' })),
-    cluster: Type.Optional(Type.Object({
-        corroborated: Type.Boolean({ description: 'Whether another detection exists within 500m/2h' }),
-        cluster_size: Type.Number({ description: 'Number of detections in the cluster' }),
-        satellites: Type.Array(Type.String(), { description: 'Satellites that detected fires in the cluster' })
-    }, { description: 'Detection clustering / corroboration info' })),
-    fire_season: Type.Optional(Type.Object({
-        season: Type.String({ description: 'FENZ fire season status (Open, Restricted, Prohibited)' }),
-        zone: Type.String({ description: 'FENZ fire season zone name' }),
-        district: Type.String({ description: 'FENZ district' }),
-        on_doc_land: Type.Boolean({ description: 'Whether the detection is on DoC conservation land' }),
-        section_52_fire_land_mgmt: Type.Union([Type.Boolean(), Type.Null()], { description: 'Section 52 fire for land management: true=allowed, false=prohibited, null=no data' })
-    }, { description: 'FENZ fire season status (when FIRE_SEASON_AWARE is enabled)' }))
+    land_cover: Type.Optional(Type.String({ description: 'Highest-risk LCDB v6.0 land cover class name (when LAND_COVER_MASKING is enabled)' })),
+    land_cover_risk: Type.Optional(Type.String({ description: 'Risk level (Critical, High, Medium, Low-Grass, Low-Scrub, Ignore, Pass-through)' })),
+    cluster_size: Type.Optional(Type.Number({ description: 'Number of detections within 500m/2h (when LAND_COVER_MASKING is enabled)' })),
+    fire_season: Type.Optional(Type.String({ description: 'FENZ fire season status (Open, Restricted, Prohibited) (when FIRE_SEASON_AWARE is enabled)' }))
 });
 
 interface FireData {
@@ -847,28 +829,14 @@ export default class Task extends ETL {
                 };
 
                 if (assessment?.landCover) {
-                    metadata.land_cover = {
-                        primary_class: assessment.landCover.primaryClass,
-                        primary_class_id: assessment.landCover.classId,
-                        risk_level: assessment.landCover.riskLevel,
-                        all_classes: assessment.landCover.allClasses.map(c => ({ name: c.name, class_id: c.classId, risk: c.risk }))
-                    };
+                    metadata.land_cover = assessment.landCover.primaryClass;
+                    metadata.land_cover_risk = assessment.landCover.riskLevel;
                 }
                 if (assessment?.cluster) {
-                    metadata.cluster = {
-                        corroborated: assessment.cluster.corroborated,
-                        cluster_size: assessment.cluster.clusterSize,
-                        satellites: assessment.cluster.satellites
-                    };
+                    metadata.cluster_size = assessment.cluster.clusterSize;
                 }
                 if (assessment?.fireSeason) {
-                    metadata.fire_season = {
-                        season: assessment.fireSeason.season,
-                        zone: assessment.fireSeason.zone,
-                        district: assessment.fireSeason.district,
-                        on_doc_land: assessment.fireSeason.onDocLand,
-                        section_52_fire_land_mgmt: assessment.fireSeason.section52FireLandMgmt
-                    };
+                    metadata.fire_season = assessment.fireSeason.season;
                 }
 
                 const feature = {
