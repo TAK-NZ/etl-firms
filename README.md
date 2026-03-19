@@ -39,8 +39,8 @@ Classifies each detection by NZ land cover type using LCDB v6.0, enabling intell
 
 | Risk Level | Land Cover | Behaviour |
 |---|---|---|
-| Critical | Indigenous Forest, Exotic Forest | Always alert — bypasses all FRP filters |
-| High | Broadleaved Indigenous Hardwoods, Deciduous Hardwoods | Alert if FRP exceeds threshold |
+| Critical | Indigenous Forest | Always alert — bypasses all FRP filters |
+| High | Exotic Forest, Broadleaved Indigenous Hardwoods, Deciduous Hardwoods | Alert if FRP exceeds threshold |
 | Medium | Manuka/Kanuka, Matagouri, Sub Alpine Shrubland, Fernland, Flaxland | Alert if FRP exceeds threshold, or at night, or corroborated |
 | Low | Grassland, Cropland, Orchards, Gorse/Broom | Likely farm/scrub burn — filtered unless FRP is high, at night, or corroborated |
 | Ignore | Built-up Area, Transport Infrastructure, Surface Mine | Filtered when urban heat filter is enabled |
