@@ -731,7 +731,14 @@ export default class Task extends ETL {
         }
 
         // Load ephemeral state
-        const ephemeral = maskingEnabled ? await this.ephemeral(EphemeralSchema) : { assessments: {} };
+        let ephemeral: { assessments: Record<string, Assessment> } = { assessments: {} };
+        if (maskingEnabled) {
+            try {
+                ephemeral = await this.ephemeral(EphemeralSchema) as typeof ephemeral;
+            } catch {
+                console.warn('Ephemeral state invalid or incompatible, starting fresh');
+            }
+        }
         if (!ephemeral.assessments) ephemeral.assessments = {};
 
         const fc = {
@@ -804,7 +811,11 @@ export default class Task extends ETL {
                             timestamp: new Date().toISOString()
                         };
 
-                        ephemeral.assessments[cachedKey] = assessment;
+                        // Only persist to ephemeral if fire season lookup succeeded (or wasn't requested)
+                        // so that failed lookups are retried on the next invocation
+                        if (!env.FIRE_SEASON_AWARE || fireSeason !== null) {
+                            ephemeral.assessments[cachedKey] = assessment;
+                        }
                     }
 
                     // Apply filter decision
