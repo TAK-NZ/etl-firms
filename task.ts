@@ -237,6 +237,27 @@ export default class Task extends ETL {
         return nzHour >= 21 || nzHour < 6;
     }
 
+    private polygonIntersectsRect(
+        rings: number[][][],
+        minX: number, minY: number, maxX: number, maxY: number
+    ): boolean {
+        // Check if any ring vertex falls inside the rect, or any rect corner inside the polygon outer ring
+        const outer = rings[0];
+        for (const [x, y] of outer) {
+            if (x >= minX && x <= maxX && y >= minY && y <= maxY) return true;
+        }
+        // Ray-cast rect corners against outer ring
+        for (const [cx, cy] of [[minX, minY], [maxX, minY], [maxX, maxY], [minX, maxY]] as [number, number][]) {
+            let inside = false;
+            for (let i = 0, j = outer.length - 1; i < outer.length; j = i++) {
+                const [xi, yi] = outer[i], [xj, yj] = outer[j];
+                if ((yi > cy) !== (yj > cy) && cx < (xj - xi) * (cy - yi) / (yj - yi) + xi) inside = !inside;
+            }
+            if (inside) return true;
+        }
+        return false;
+    }
+
     private async queryLandCover(
         bbox: { lonMin: number; latMin: number; lonMax: number; latMax: number },
         apiKey: string
@@ -246,19 +267,28 @@ export default class Task extends ETL {
 
         try {
             const cql = `BBOX(GEOMETRY,${bbox.lonMin},${bbox.latMin},${bbox.lonMax},${bbox.latMax},'EPSG:4326')`;
-            const url = `https://lris.scinfo.org.nz/services;key=${apiKey}/wfs?service=WFS&version=2.0.0&request=GetFeature&typeNames=layer-123148&outputFormat=json&srsName=EPSG:4326&propertyName=Name_2023,Class_2023&cql_filter=${encodeURIComponent(cql)}`;
+            const url = `https://lris.scinfo.org.nz/services;key=${apiKey}/wfs?service=WFS&version=2.0.0&request=GetFeature&typeNames=layer-123148&outputFormat=json&srsName=EPSG:4326&propertyName=Name_2023,Class_2023,GEOMETRY&cql_filter=${encodeURIComponent(cql)}`;
             const res = await fetch(url);
             if (!res.ok) {
                 console.warn(`LRIS WFS returned ${res.status}: ${res.statusText}`);
                 this.landCoverCache.set(key, null);
                 return null;
             }
-            const data = await res.json() as { features?: Array<{ properties?: { Name_2023?: string; Class_2023?: number } }> };
-            const features: LandCoverFeature[] = (data.features || []).map(f => {
-                const name = f.properties?.Name_2023 || 'Unknown';
-                const classId = f.properties?.Class_2023 || 0;
-                return { name, classId, risk: LAND_COVER_RISK[name] || 'Pass-through' };
-            });
+            const data = await res.json() as { features?: Array<{ properties?: { Name_2023?: string; Class_2023?: number }; geometry?: { type: string; coordinates: number[][][] | number[][][][] } }> };
+            const features: LandCoverFeature[] = (data.features || [])
+                .filter(f => {
+                    const geom = f.geometry;
+                    if (!geom) return false;
+                    const ringsets: number[][][][] = geom.type === 'MultiPolygon'
+                        ? geom.coordinates as number[][][][]
+                        : [geom.coordinates as number[][][]];
+                    return ringsets.some(rings => this.polygonIntersectsRect(rings, bbox.lonMin, bbox.latMin, bbox.lonMax, bbox.latMax));
+                })
+                .map(f => {
+                    const name = f.properties?.Name_2023 || 'Unknown';
+                    const classId = f.properties?.Class_2023 || 0;
+                    return { name, classId, risk: LAND_COVER_RISK[name] || 'Pass-through' };
+                });
             this.landCoverCache.set(key, features);
             return features;
         } catch (err) {
