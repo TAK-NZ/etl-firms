@@ -785,10 +785,17 @@ export default class Task extends ETL {
                     const cached = ephemeral.assessments[cachedKey];
 
                     if (cached?.landCover) {
-                        // Land cover is cached but cluster must be recomputed from the current batch
+                        // Land cover is cached but cluster must be recomputed from the current batch.
+                        // Re-derive risk from LAND_COVER_RISK by name so ephemeral entries reflect
+                        // any changes to the risk table without waiting for cache expiry.
+                        const freshClasses: LandCoverFeature[] = cached.landCover.allClasses.map(c => ({
+                            name: c.name,
+                            classId: c.classId,
+                            risk: LAND_COVER_RISK[c.name] || 'Pass-through' as RiskLevel
+                        }));
                         const cluster = clusterMap.get(fire) || { corroborated: false, clusterSize: 1, satellites: [fire.satellite] };
                         const classification = this.classifyDetection(
-                            cached.landCover!.allClasses as LandCoverFeature[],
+                            freshClasses,
                             fire.frp,
                             acqDateTimeUTC,
                             env,
@@ -797,7 +804,7 @@ export default class Task extends ETL {
                         );
                         assessment = {
                             ...cached as Assessment,
-                            landCover: { ...cached.landCover!, passThrough: classification.passThrough, riskLevel: classification.riskLevel },
+                            landCover: { ...cached.landCover!, passThrough: classification.passThrough, riskLevel: classification.riskLevel, allClasses: freshClasses },
                             cluster
                         };
                     } else {
