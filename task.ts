@@ -70,7 +70,7 @@ const RISK_PRIORITY: Record<RiskLevel, number> = {
 
 const LAND_COVER_RISK: Record<string, RiskLevel> = {
     'Indigenous Forest': 'Critical',
-    'Exotic Forest': 'Critical',
+    'Exotic Forest': 'High',
     'Broadleaved Indigenous Hardwoods': 'High',
     'Deciduous Hardwoods': 'Medium',
     'Manuka and/or Kanuka': 'Medium',
