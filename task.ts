@@ -182,6 +182,7 @@ interface FireData {
     track: number;
     acq_date: string;
     acq_time: string;
+    acq_datetime?: string;
     satellite: string;
     confidence: number;
     version: string;
@@ -684,7 +685,7 @@ export default class Task extends ETL {
                 const zip = new (AdmZip as unknown as new (buffer: Buffer) => AdmZip)(Buffer.from(kmzBuffer));
                 const entries = zip.getEntries();
                 
-                console.log(`KMZ entries for ${kmlSource.name}:`, entries.map(e => e.entryName));
+                console.log(`KMZ entries for ${kmlSource.name}:`, entries.map((e: AdmZip.IZipEntry) => e.entryName));
                 for (const entry of entries) {
                     if (entry.entryName.endsWith('.kml')) {
                         const kmlContent = entry.getData().toString('utf8');
