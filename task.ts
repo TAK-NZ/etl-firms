@@ -48,6 +48,10 @@ const Environment = Type.Object({
         default: 40,
         description: 'Minimum FRP (MW) for Low risk grassland classes (e.g. High Producing Exotic Grassland) during daytime'
     }),
+    FRP_CORROBORATED_LOW: Type.Number({
+        default: 20,
+        description: 'Minimum FRP (MW) for corroborated Low-Grass/Low-Scrub detections. Applied instead of the full threshold when a detection is confirmed by multiple satellite passes. Set to 0 to disable (allow any corroborated detection through).'
+    }),
     FILTER_URBAN_HEAT: Type.Boolean({
         default: false,
         description: 'Filter out detections on urban land cover (Built-up Area, Transport Infrastructure, Surface Mine or Dump). Requires LAND_COVER_MASKING.'
@@ -414,7 +418,16 @@ export default class Task extends ETL {
         const isCorroborated = corroboration.corroborated;
         const isRestricted = fireSeason && (fireSeason.season === 'Restricted' || fireSeason.season === 'Prohibited');
 
-        if (isNight || isCorroborated || isRestricted) {
+        if (isNight || isRestricted) {
+            return { passThrough: true, riskLevel: highest, classes: landCoverFeatures };
+        }
+
+        // Corroborated Low-Grass/Low-Scrub: apply reduced FRP floor rather than bypassing entirely
+        if (isCorroborated && (highest === 'Low-Grass' || highest === 'Low-Scrub')) {
+            return { passThrough: frp > env.FRP_CORROBORATED_LOW, riskLevel: highest, classes: landCoverFeatures };
+        }
+
+        if (isCorroborated) {
             return { passThrough: true, riskLevel: highest, classes: landCoverFeatures };
         }
 

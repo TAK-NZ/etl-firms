@@ -46,7 +46,7 @@ Classifies each detection by NZ land cover type using LCDB v6.0, enabling intell
 | Ignore | Built-up Area, Transport Infrastructure, Surface Mine | Filtered when urban heat filter is enabled |
 
 ### Detection Clustering
-Scans the detection batch for nearby fires (within 500m / 2 hours). Corroborated detections — where multiple pixels or satellite passes confirm the same fire — bypass FRP thresholds for Medium/Low risk land cover.
+Scans the detection batch for nearby fires (within 500m / 2 hours). Corroborated detections — where multiple pixels or satellite passes confirm the same fire — bypass FRP thresholds for Medium risk land cover, and apply a reduced FRP floor (`FRP_CORROBORATED_LOW`) for Low-Grass/Low-Scrub rather than bypassing the threshold entirely. This prevents clusters of adjacent farm burns from being mistaken for a wildfire.
 
 ### Fire Season Awareness
 Queries FENZ fire season status for each detection location:
@@ -159,6 +159,7 @@ Get your LRIS API Key (free) from: https://lris.scinfo.org.nz/ (requires access 
 | `FRP_THRESHOLD_MEDIUM` | `25` | `20` | Min FRP (MW) for Medium risk classes (Manuka/Kanuka, Scrub) |
 | `FRP_THRESHOLD_LOW_SCRUB` | `30` | `30` | Min FRP (MW) for Gorse/Broom |
 | `FRP_THRESHOLD_LOW_GRASS` | `40` | `35` | Min FRP (MW) for Grassland/Cropland |
+| `FRP_CORROBORATED_LOW` | `20` | `20` | Min FRP (MW) for corroborated Low-Grass/Low-Scrub detections. Replaces the full threshold when a detection is confirmed by nearby pixels or a second satellite pass. Set to `0` to allow any corroborated Low detection through. |
 | `FILTER_URBAN_HEAT` | `false` | `true` | Filter out detections on urban land cover |
 | `FIRE_SEASON_AWARE` | `false` | `true` | Enable FENZ fire season lookups (no key required) |
 
