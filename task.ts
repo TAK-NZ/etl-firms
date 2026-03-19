@@ -182,13 +182,13 @@ interface FireData {
     track: number;
     acq_date: string;
     acq_time: string;
+    acq_datetime?: string;
     satellite: string;
     confidence: number;
     version: string;
     brightness_2: number;
     frp: number;
     daynight: string;
-    acq_datetime: string;
 }
 
 export default class Task extends ETL {
@@ -309,20 +309,22 @@ export default class Task extends ETL {
         try {
             const baseParams = `f=json&geometry=${lon},${lat}&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&returnGeometry=false`;
 
-            const [seasonRes, docRes, s52Res] = await Promise.all([
-                fetch(`https://utility.arcgis.com/usrsvcs/servers/b381ba9bdd4046c2b71a6b1a1e39da78/rest/services/FENZ/MapServer/27/query?${baseParams}&outFields=Name,SEASON,Region,District,Zone_`),
-                fetch(`https://utility.arcgis.com/usrsvcs/servers/e6865ced067f4234b047732b4d38a711/rest/services/FENZ_PCL/FeatureServer/0/query?${baseParams}&outFields=OBJECTID`),
+            const [seasonResult, docResult, s52Result] = await Promise.all([
+                fetch(`https://utility.arcgis.com/usrsvcs/servers/b381ba9bdd4046c2b71a6b1a1e39da78/rest/services/FENZ/MapServer/27/query?${baseParams}&outFields=Name,SEASON,Region,District,Zone_`)
+                    .then(async r => ({ ok: r.ok, status: r.status, data: r.ok ? await r.json() as { features?: Array<{ attributes?: Record<string, unknown> }> } : null })),
+                fetch(`https://utility.arcgis.com/usrsvcs/servers/e6865ced067f4234b047732b4d38a711/rest/services/FENZ_PCL/FeatureServer/0/query?${baseParams}&outFields=OBJECTID`)
+                    .then(async r => ({ ok: r.ok, data: r.ok ? await r.json() as { features?: unknown[] } : null })),
                 fetch(`https://services1.arcgis.com/dcVyucRsXCQAi3GL/arcgis/rest/services/Section_52_Localities_v2_view/FeatureServer/0/query?${baseParams}&outFields=Fire_Land_Management`)
+                    .then(async r => ({ ok: r.ok, data: r.ok ? await r.json() as { features?: Array<{ attributes?: { Fire_Land_Management?: number } }> } : null }))
             ]);
 
-            if (!seasonRes.ok) {
-                console.warn(`FENZ fire season API returned ${seasonRes.status}`);
+            if (!seasonResult.ok) {
+                console.warn(`FENZ fire season API returned ${seasonResult.status}`);
                 this.fireSeasonCache.set(key, null);
                 return null;
             }
 
-            const seasonData = await seasonRes.json() as { features?: Array<{ attributes?: Record<string, unknown> }> };
-            const seasonAttr = seasonData.features?.[0]?.attributes;
+            const seasonAttr = seasonResult.data?.features?.[0]?.attributes;
             if (!seasonAttr) {
                 this.fireSeasonCache.set(key, null);
                 return null;
@@ -331,13 +333,12 @@ export default class Task extends ETL {
             let season = String(seasonAttr.SEASON || 'Unknown');
             if (season === 'Defence' || season === 'Prohibition in open air') season = 'Prohibited';
 
-            const onDocLand = docRes.ok && ((await docRes.json() as { features?: unknown[] }).features?.length || 0) > 0;
+            const onDocLand = docResult.ok && (docResult.data?.features?.length || 0) > 0;
             if (onDocLand && season === 'Open') season = 'Restricted';
 
             let section52FireLandMgmt: boolean | null = null;
-            if (s52Res.ok) {
-                const s52Data = await s52Res.json() as { features?: Array<{ attributes?: { Fire_Land_Management?: number } }> };
-                const s52Attr = s52Data.features?.[0]?.attributes;
+            if (s52Result.ok) {
+                const s52Attr = s52Result.data?.features?.[0]?.attributes;
                 if (s52Attr && s52Attr.Fire_Land_Management !== undefined) {
                     section52FireLandMgmt = s52Attr.Fire_Land_Management === 1;
                 }
@@ -684,7 +685,7 @@ export default class Task extends ETL {
                 const zip = new (AdmZip as unknown as new (buffer: Buffer) => AdmZip)(Buffer.from(kmzBuffer));
                 const entries = zip.getEntries();
                 
-                console.log(`KMZ entries for ${kmlSource.name}:`, entries.map(e => e.entryName));
+                console.log(`KMZ entries for ${kmlSource.name}:`, entries.map((e: AdmZip.IZipEntry) => e.entryName));
                 for (const entry of entries) {
                     if (entry.entryName.endsWith('.kml')) {
                         const kmlContent = entry.getData().toString('utf8');
@@ -731,7 +732,14 @@ export default class Task extends ETL {
         }
 
         // Load ephemeral state
-        const ephemeral = maskingEnabled ? await this.ephemeral(EphemeralSchema) : { assessments: {} };
+        let ephemeral: { assessments: Record<string, Assessment> } = { assessments: {} };
+        if (maskingEnabled) {
+            try {
+                ephemeral = await this.ephemeral(EphemeralSchema) as typeof ephemeral;
+            } catch {
+                console.warn('Ephemeral state invalid or incompatible, starting fresh');
+            }
+        }
         if (!ephemeral.assessments) ephemeral.assessments = {};
 
         const fc = {
@@ -777,7 +785,21 @@ export default class Task extends ETL {
                     const cached = ephemeral.assessments[cachedKey];
 
                     if (cached?.landCover) {
-                        assessment = cached as Assessment;
+                        // Land cover is cached but cluster must be recomputed from the current batch
+                        const cluster = clusterMap.get(fire) || { corroborated: false, clusterSize: 1, satellites: [fire.satellite] };
+                        const classification = this.classifyDetection(
+                            cached.landCover!.allClasses as LandCoverFeature[],
+                            fire.frp,
+                            acqDateTimeUTC,
+                            env,
+                            cluster,
+                            (cached.fireSeason as FireSeasonResult | null) ?? null
+                        );
+                        assessment = {
+                            ...cached as Assessment,
+                            landCover: { ...cached.landCover!, passThrough: classification.passThrough, riskLevel: classification.riskLevel },
+                            cluster
+                        };
                     } else {
                         const pixelSize = fire.satellite.includes('VIIRS') ? 375 : 1000;
                         const bbox = this.computeFootprintBbox(fire.latitude, fire.longitude, pixelSize);
@@ -804,7 +826,11 @@ export default class Task extends ETL {
                             timestamp: new Date().toISOString()
                         };
 
-                        ephemeral.assessments[cachedKey] = assessment;
+                        // Only persist to ephemeral if fire season lookup succeeded (or wasn't requested)
+                        // so that failed lookups are retried on the next invocation
+                        if (!env.FIRE_SEASON_AWARE || fireSeason !== null) {
+                            ephemeral.assessments[cachedKey] = assessment;
+                        }
                     }
 
                     // Apply filter decision
