@@ -6,9 +6,9 @@ import AdmZip from 'adm-zip';
 import { DOMParser } from '@xmldom/xmldom';
 
 const Environment = Type.Object({
-    MAP_KEY: Type.String({
-        description: 'NASA FIRMS Map Key from https://firms.modaps.eosdis.nasa.gov/mapserver/wfs-info/'
-    }),
+    MAP_KEY: Type.Optional(Type.String({
+        description: 'NASA FIRMS Map Key — no longer used (CSV sources removed). Kept for backward compatibility.'
+    })),
     BBOX: Type.String({
         default: '-47.3,166.3,-34.4,178.6',
         description: 'Bounding box coordinates (minLat,minLon,maxLat,maxLon)'
@@ -70,7 +70,7 @@ const RISK_PRIORITY: Record<RiskLevel, number> = {
 
 const LAND_COVER_RISK: Record<string, RiskLevel> = {
     'Indigenous Forest': 'Critical',
-    'Exotic Forest': 'High',
+    'Exotic Forest': 'Critical',
     'Broadleaved Indigenous Hardwoods': 'High',
     'Deciduous Hardwoods': 'Medium',
     'Manuka and/or Kanuka': 'Medium',
@@ -182,7 +182,7 @@ interface FireData {
     track: number;
     acq_date: string;
     acq_time: string;
-    acq_datetime?: string;
+    acq_datetime: string;
     satellite: string;
     confidence: number;
     version: string;
@@ -217,9 +217,7 @@ export default class Task extends ETL {
     }
 
     private createFootprintPolygon(lat: number, lon: number, pixelSize: number): [number, number][] {
-        // Convert pixel size from meters to degrees (approximate)
-        const metersPerDegree = 111320; // at equator
-        const halfSize = (pixelSize / 2) / metersPerDegree;
+        const halfSize = (pixelSize / 2) / Task.METERS_PER_DEGREE;
         const halfSizeLon = halfSize / Math.cos(lat * Math.PI / 180);
 
         return [
@@ -442,7 +440,7 @@ export default class Task extends ETL {
         return { passThrough: frp > threshold, riskLevel: highest, classes: landCoverFeatures };
     }
 
-    private parseKML(kmlContent: string, source: string): FireData[] {
+    private parseKML(kmlContent: string, source: string, bbox: { minLat: number; minLon: number; maxLat: number; maxLon: number }): FireData[] {
         const fires: FireData[] = [];
         const parser = new DOMParser();
         const doc = parser.parseFromString(kmlContent, 'text/xml');
@@ -473,7 +471,7 @@ export default class Task extends ETL {
             const [lon, lat] = coordinates.split(',').map(Number);
             
             // Filter for New Zealand coordinates
-            if (lon < 166 || lon > 179 || lat < -47 || lat > -34) continue;
+            if (lon < bbox.minLon || lon > bbox.maxLon || lat < bbox.minLat || lat > bbox.maxLat) continue;
             nzCount++;
             
             // Extract data from KML description
@@ -549,69 +547,6 @@ export default class Task extends ETL {
         console.log(`NZ coordinates found in ${source}:`, nzCount, `fires parsed:`, fires.length);
         return fires;
     }
-    
-    private parseCSV(csvText: string, source: string): FireData[] {
-        const lines = csvText.trim().split('\n');
-        if (lines.length < 2) return [];
-        
-        const headers = lines[0].split(',');
-        const fires: FireData[] = [];
-        
-        // Map source to satellite name
-        const satelliteMap: Record<string, string> = {
-            'MODIS_NRT': 'MODIS',
-            'VIIRS_SNPP_NRT': 'VIIRS S-NPP',
-            'VIIRS_NOAA20_NRT': 'VIIRS NOAA-20',
-            'VIIRS_NOAA21_NRT': 'VIIRS NOAA-21'
-        };
-        
-        for (let i = 1; i < lines.length; i++) {
-            const values = lines[i].split(',');
-            if (values.length !== headers.length) continue;
-            
-            const fire: Record<string, string | number> = {};
-            headers.forEach((header, index) => {
-                const value = values[index]?.trim();
-                if (['latitude', 'longitude', 'brightness', 'scan', 'track', 'brightness_2', 'frp'].includes(header)) {
-                    fire[header] = parseFloat(value);
-                } else if (header === 'confidence') {
-                    // Handle both numeric (MODIS) and letter (VIIRS) confidence values
-                    const numValue = parseFloat(value);
-                    if (!isNaN(numValue)) {
-                        fire[header] = numValue;
-                    } else {
-                        // Convert letter codes to numeric: h=80, n=60, l=40
-                        fire[header] = value === 'h' ? 80 : value === 'n' ? 60 : value === 'l' ? 40 : 0;
-                    }
-                } else {
-                    fire[header] = value;
-                }
-            });
-            
-            // Add satellite name from source
-            fire.satellite = satelliteMap[source] || source;
-            
-            // Handle different field names between MODIS and VIIRS
-            if (headers.includes('bright_ti4')) {
-                fire.brightness = fire.bright_ti4 as number;
-                fire.brightness_2 = fire.bright_ti5 as number;
-            }
-            
-            if (!isNaN(fire.latitude as number) && !isNaN(fire.longitude as number)) {
-                fires.push(fire as unknown as FireData);
-            }
-        }
-        
-        return fires;
-    }
-
-
-
-
-
-
-
-
 
     async schema(
         type: SchemaType = SchemaType.Input,
@@ -631,40 +566,12 @@ export default class Task extends ETL {
     async control(): Promise<void> {
         const env = await this.env(Environment);
 
-        const sources = [
-            'MODIS_NRT',
-            'VIIRS_SNPP_NRT',
-            'VIIRS_NOAA20_NRT',
-            'VIIRS_NOAA21_NRT'
-        ];
-        
-        // Convert BBOX from minLat,minLon,maxLat,maxLon to west,south,east,north
-        const [minLat, minLon, maxLat, maxLon] = env.BBOX.split(',').map(Number);
-        const areaCoords = `${minLon},${minLat},${maxLon},${maxLat}`;
-
         let allFires: FireData[] = [];
 
-        // Fetch data from CSV API sources
-        for (const source of sources) {
-            try {
-                const firmsUrl = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${env.MAP_KEY}/${source}/${areaCoords}/1`;
-                const firmsRes = await fetch(firmsUrl);
-                
-                if (!firmsRes.ok) {
-                    console.warn(`FIRMS API returned ${firmsRes.status} for ${source}: ${firmsRes.statusText}`);
-                    continue;
-                }
-                
-                const csvText = await firmsRes.text();
-                const fires = this.parseCSV(csvText, source);
-                allFires = allFires.concat(fires);
-                console.log(`Found ${fires.length} fire detections from ${source} API`);
-            } catch (error) {
-                console.error(`Error fetching ${source} API:`, error);
-            }
-        }
-        
-        // Fetch data from KML sources
+        const [minLat, minLon, maxLat, maxLon] = env.BBOX.split(',').map(Number);
+        const bbox = { minLat, minLon, maxLat, maxLon };
+
+        // Fetch data from KML sources (public, no API key required)
         const kmlSources = [
             { name: 'MODIS_C6.1', url: 'https://firms.modaps.eosdis.nasa.gov/api/kml_fire_footprints/australia_newzealand/24h/c6.1/FirespotArea_australia_newzealand_c6.1_24h.kmz' },
             { name: 'VIIRS_SNPP', url: 'https://firms.modaps.eosdis.nasa.gov/api/kml_fire_footprints/australia_newzealand/24h/suomi-npp-viirs-c2/FirespotArea_australia_newzealand_suomi-npp-viirs-c2_24h.kmz' },
@@ -690,7 +597,7 @@ export default class Task extends ETL {
                     if (entry.entryName.endsWith('.kml')) {
                         const kmlContent = entry.getData().toString('utf8');
                         console.log(`KML content length for ${kmlSource.name}:`, kmlContent.length);
-                        const fires = this.parseKML(kmlContent, kmlSource.name);
+                        const fires = this.parseKML(kmlContent, kmlSource.name, bbox);
                         allFires = allFires.concat(fires);
                         console.log(`Found ${fires.length} fire detections from ${kmlSource.name} KML`);
                         break;
