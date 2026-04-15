@@ -6,16 +6,18 @@
 
 | Data Provider | API Endpoint | Content |
 |---|---|---|
-| NASA FIRMS | https://firms.modaps.eosdis.nasa.gov/api/area/csv/YourMapKey/SOURCE/COORDINATES/DAYS | Active fire detections from multiple satellites |
+| NASA FIRMS | https://firms.modaps.eosdis.nasa.gov/api/kml_fire_footprints/ | Active fire detections from multiple satellites (KMZ) |
 
 ### Data Sources
 
-| Source | Satellite | Processing | Description |
-|---|---|---|---|
-| MODIS_NRT | Terra/Aqua | Near Real-Time | MODIS fire detections with minimal delay |
-| VIIRS_SNPP_NRT | Suomi-NPP | Near Real-Time | VIIRS fire detections from S-NPP satellite |
-| VIIRS_NOAA20_NRT | NOAA-20 | Near Real-Time | VIIRS fire detections from NOAA-20 satellite |
-| VIIRS_NOAA21_NRT | NOAA-21 | Near Real-Time | VIIRS fire detections from NOAA-21 satellite |
+| Source | Satellite | Description |
+|---|---|---|
+| MODIS_C6.1 | Terra/Aqua | MODIS fire detections (1km resolution) |
+| VIIRS_SNPP | Suomi-NPP | VIIRS fire detections (375m resolution) |
+| VIIRS_NOAA20 | NOAA-20 | VIIRS fire detections (375m resolution) |
+| VIIRS_NOAA21 | NOAA-21 | VIIRS fire detections (375m resolution) |
+
+Data is fetched from the public Australia/New Zealand KMZ fire footprint files (no API key required).
 
 ### Enrichment Sources
 
@@ -129,7 +131,7 @@ When the ETL is deployed the `ETL_API` and `ETL_LAYER` variables will be provide
 ```bash
 export ETL_API="http://localhost:5001"
 export ETL_LAYER="19"
-export MAP_KEY="your-nasa-firms-map-key"
+export MAP_KEY="your-nasa-firms-map-key"  # optional, no longer used
 export BBOX="-47.3,166.3,-34.4,178.6"
 export MIN_CONFIDENCE="40"
 export MIN_FRP="10"
@@ -148,7 +150,7 @@ Get your LRIS API Key (free) from: https://lris.scinfo.org.nz/ (requires access 
 
 | Setting | Default | Recommended | Description |
 |---|---|---|---|
-| `MAP_KEY` | — | — | NASA FIRMS Map Key (required) |
+| `MAP_KEY` | — | — | No longer used (CSV sources removed). Kept for backward compatibility. |
 | `BBOX` | `-47.3,166.3,-34.4,178.6` | (default) | Bounding box: minLat,minLon,maxLat,maxLon |
 | `MIN_CONFIDENCE` | `50` | `40` | Minimum confidence %. Lower to include borderline detections that clustering can validate. |
 | `MIN_FRP` | `20` | `10` | Minimum FRP (MW). Set low and let land cover thresholds handle filtering per risk level. At 5 MW too many post-harvest forestry burns pass through. |
