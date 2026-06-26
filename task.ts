@@ -1,5 +1,5 @@
 
-import { Type, TSchema, Static } from '@sinclair/typebox';
+import { Type, TSchema } from '@sinclair/typebox';
 import { fetch } from '@tak-ps/etl';
 import ETL, { Event, SchemaType, handler as internal, local, DataFlowType, InvocationType } from '@tak-ps/etl';
 import AdmZip from 'adm-zip';
@@ -25,78 +25,11 @@ const Environment = Type.Object({
         default: false,
         description: 'Show fire pixel footprint as a square (375m for VIIRS, 1km for MODIS)'
     }),
-    LAND_COVER_MASKING: Type.Boolean({
-        default: false,
-        description: 'Enable land cover masking using LCDB v6.0 to classify fire detections. Requires LRIS_API_KEY.'
-    }),
-    LRIS_API_KEY: Type.Optional(Type.String({
-        description: 'LRIS (Manaaki Whenua) API key for land cover lookups. Get one free at https://lris.scinfo.org.nz/. If not provided, land cover masking is disabled and all detections pass through unfiltered.'
-    })),
-    FRP_THRESHOLD_HIGH: Type.Number({
-        default: 10,
-        description: 'Minimum FRP (MW) for High risk land cover classes (e.g. Broadleaved Indigenous Hardwoods)'
-    }),
-    FRP_THRESHOLD_MEDIUM: Type.Number({
-        default: 25,
-        description: 'Minimum FRP (MW) for Medium risk land cover classes (e.g. Manuka/Kanuka) during daytime'
-    }),
-    FRP_THRESHOLD_LOW_SCRUB: Type.Number({
-        default: 30,
-        description: 'Minimum FRP (MW) for Low risk scrub classes (e.g. Gorse and/or Broom)'
-    }),
-    FRP_THRESHOLD_LOW_GRASS: Type.Number({
-        default: 40,
-        description: 'Minimum FRP (MW) for Low risk grassland classes (e.g. High Producing Exotic Grassland) during daytime'
-    }),
-    FRP_CORROBORATED_LOW: Type.Number({
-        default: 20,
-        description: 'Minimum FRP (MW) for corroborated Low-Grass/Low-Scrub detections. Applied instead of the full threshold when a detection is confirmed by multiple satellite passes. Set to 0 to disable (allow any corroborated detection through).'
-    }),
-    FILTER_URBAN_HEAT: Type.Boolean({
-        default: false,
-        description: 'Filter out detections on urban land cover (Built-up Area, Transport Infrastructure, Surface Mine or Dump). Requires LAND_COVER_MASKING.'
-    }),
     FIRE_SEASON_AWARE: Type.Boolean({
         default: false,
-        description: 'Enable FENZ fire season lookups to adjust detection priority. Uses public ArcGIS APIs (no key required).'
+        description: 'Enable FENZ fire season lookups to annotate detections. Uses public ArcGIS APIs (no key required).'
     })
 });
-
-type RiskLevel = 'Critical' | 'High' | 'Medium' | 'Low-Grass' | 'Low-Scrub' | 'Ignore' | 'Pass-through';
-
-const RISK_PRIORITY: Record<RiskLevel, number> = {
-    'Critical': 6, 'High': 5, 'Medium': 4, 'Low-Scrub': 3, 'Low-Grass': 2, 'Ignore': 1, 'Pass-through': 0
-};
-
-const LAND_COVER_RISK: Record<string, RiskLevel> = {
-    'Indigenous Forest': 'Critical',
-    'Exotic Forest': 'Critical',
-    'Broadleaved Indigenous Hardwoods': 'High',
-    'Deciduous Hardwoods': 'Medium',
-    'Manuka and/or Kanuka': 'Medium',
-    'Matagouri or Grey Scrub': 'Medium',
-    'Sub Alpine Shrubland': 'Medium',
-    'Fernland': 'Medium',
-    'Flaxland': 'Medium',
-    'High Producing Exotic Grassland': 'Low-Grass',
-    'Low Producing Grassland': 'Low-Grass',
-    'Tall Tussock Grassland': 'Low-Grass',
-    'Short-rotation Cropland': 'Low-Grass',
-    'Orchard Vineyard and Other Perennial Crops': 'Low-Grass',
-    'Gorse and/or Broom': 'Low-Scrub',
-    'Forest - Harvested': 'Low-Grass',
-    'Built-up Area (settlement)': 'Ignore',
-    'Urban Parkland/Open Space': 'Ignore',
-    'Transport Infrastructure': 'Ignore',
-    'Surface Mine or Dump': 'Ignore',
-    'Not land': 'Ignore',
-};
-
-interface LandCoverFeature {
-    name: string;
-    classId: number;
-    risk: RiskLevel;
-}
 
 interface ClusterResult {
     corroborated: boolean;
@@ -112,48 +45,6 @@ interface FireSeasonResult {
     section52FireLandMgmt: boolean | null;
 }
 
-interface Assessment {
-    landCover: {
-        primaryClass: string;
-        classId: number;
-        riskLevel: string;
-        passThrough: boolean;
-        allClasses: LandCoverFeature[];
-    } | null;
-    fireSeason: FireSeasonResult | null;
-    cluster: ClusterResult;
-    timestamp: string;
-}
-
-const EphemeralSchema = Type.Object({
-    assessments: Type.Optional(Type.Record(Type.String(), Type.Object({
-        landCover: Type.Optional(Type.Object({
-            primaryClass: Type.String(),
-            classId: Type.Number(),
-            riskLevel: Type.String(),
-            passThrough: Type.Boolean(),
-            allClasses: Type.Array(Type.Object({
-                name: Type.String(),
-                classId: Type.Number(),
-                risk: Type.String()
-            }))
-        })),
-        fireSeason: Type.Optional(Type.Object({
-            season: Type.String(),
-            zone: Type.String(),
-            district: Type.String(),
-            onDocLand: Type.Boolean(),
-            section52FireLandMgmt: Type.Union([Type.Boolean(), Type.Null()])
-        })),
-        cluster: Type.Optional(Type.Object({
-            corroborated: Type.Boolean(),
-            clusterSize: Type.Number(),
-            satellites: Type.Array(Type.String())
-        })),
-        timestamp: Type.String()
-    })))
-});
-
 const FireDetectionSchema = Type.Object({
     satellite: Type.String({ description: 'Satellite name (MODIS, VIIRS S-NPP, VIIRS NOAA-20, VIIRS NOAA-21)' }),
     time_since_detection: Type.String({ description: 'Time since detection in hours (< 1, 1-3, 3-6, 6-12, 12-24)' }),
@@ -168,9 +59,7 @@ const FireDetectionSchema = Type.Object({
     version: Type.String({ description: 'Data version' }),
     latitude: Type.Number({ description: 'Latitude' }),
     longitude: Type.Number({ description: 'Longitude' }),
-    land_cover: Type.Optional(Type.String({ description: 'Highest-risk LCDB v6.0 land cover class name (when LAND_COVER_MASKING is enabled)' })),
-    land_cover_risk: Type.Optional(Type.String({ description: 'Risk level (Critical, High, Medium, Low-Grass, Low-Scrub, Ignore, Pass-through)' })),
-    cluster_size: Type.Optional(Type.Number({ description: 'Number of detections within 500m/2h (when LAND_COVER_MASKING is enabled)' })),
+    cluster_size: Type.Optional(Type.Number({ description: 'Number of detections within 500m/2h' })),
     fire_season: Type.Optional(Type.String({ description: 'FENZ fire season status (Open, Restricted, Prohibited) (when FIRE_SEASON_AWARE is enabled)' }))
 });
 
@@ -200,21 +89,8 @@ export default class Task extends ETL {
     private static readonly METERS_PER_DEGREE = 111320;
     private static readonly CLUSTER_RADIUS_M = 500;
     private static readonly CLUSTER_TIME_HOURS = 2;
-    private static readonly FIRE_SEASON_MULTIPLIER = 1.5;
 
-    private landCoverCache = new Map<string, LandCoverFeature[] | null>();
     private fireSeasonCache = new Map<string, FireSeasonResult | null>();
-
-    private computeFootprintBbox(lat: number, lon: number, pixelSize: number): { lonMin: number; latMin: number; lonMax: number; latMax: number } {
-        const halfSize = (pixelSize / 2) / Task.METERS_PER_DEGREE;
-        const halfSizeLon = halfSize / Math.cos(lat * Math.PI / 180);
-        return {
-            lonMin: lon - halfSizeLon,
-            latMin: lat - halfSize,
-            lonMax: lon + halfSizeLon,
-            latMax: lat + halfSize
-        };
-    }
 
     private createFootprintPolygon(lat: number, lon: number, pixelSize: number): [number, number][] {
         const halfSize = (pixelSize / 2) / Task.METERS_PER_DEGREE;
@@ -227,77 +103,6 @@ export default class Task extends ETL {
             [lon - halfSizeLon, lat + halfSize],
             [lon - halfSizeLon, lat - halfSize]
         ];
-    }
-
-    private cacheKey(bbox: { lonMin: number; latMin: number; lonMax: number; latMax: number }): string {
-        return `${bbox.lonMin.toFixed(2)}_${bbox.latMin.toFixed(2)}_${bbox.lonMax.toFixed(2)}_${bbox.latMax.toFixed(2)}`;
-    }
-
-    private isNightTimeNZ(acqDateTimeUTC: string): boolean {
-        const d = new Date(acqDateTimeUTC);
-        const nzHour = parseInt(d.toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland', hour: 'numeric', hour12: false }));
-        return nzHour >= 21 || nzHour < 6;
-    }
-
-    private polygonIntersectsRect(
-        rings: number[][][],
-        minX: number, minY: number, maxX: number, maxY: number
-    ): boolean {
-        // Check if any ring vertex falls inside the rect, or any rect corner inside the polygon outer ring
-        const outer = rings[0];
-        for (const [x, y] of outer) {
-            if (x >= minX && x <= maxX && y >= minY && y <= maxY) return true;
-        }
-        // Ray-cast rect corners against outer ring
-        for (const [cx, cy] of [[minX, minY], [maxX, minY], [maxX, maxY], [minX, maxY]] as [number, number][]) {
-            let inside = false;
-            for (let i = 0, j = outer.length - 1; i < outer.length; j = i++) {
-                const [xi, yi] = outer[i], [xj, yj] = outer[j];
-                if ((yi > cy) !== (yj > cy) && cx < (xj - xi) * (cy - yi) / (yj - yi) + xi) inside = !inside;
-            }
-            if (inside) return true;
-        }
-        return false;
-    }
-
-    private async queryLandCover(
-        bbox: { lonMin: number; latMin: number; lonMax: number; latMax: number },
-        apiKey: string
-    ): Promise<LandCoverFeature[] | null> {
-        const key = this.cacheKey(bbox);
-        if (this.landCoverCache.has(key)) return this.landCoverCache.get(key)!;
-
-        try {
-            const cql = `BBOX(GEOMETRY,${bbox.lonMin},${bbox.latMin},${bbox.lonMax},${bbox.latMax},'EPSG:4326')`;
-            const url = `https://lris.scinfo.org.nz/services;key=${apiKey}/wfs?service=WFS&version=2.0.0&request=GetFeature&typeNames=layer-123148&outputFormat=json&srsName=EPSG:4326&propertyName=Name_2023,Class_2023,GEOMETRY&cql_filter=${encodeURIComponent(cql)}`;
-            const res = await fetch(url);
-            if (!res.ok) {
-                console.warn(`LRIS WFS returned ${res.status}: ${res.statusText}`);
-                this.landCoverCache.set(key, null);
-                return null;
-            }
-            const data = await res.json() as { features?: Array<{ properties?: { Name_2023?: string; Class_2023?: number }; geometry?: { type: string; coordinates: number[][][] | number[][][][] } }> };
-            const features: LandCoverFeature[] = (data.features || [])
-                .filter(f => {
-                    const geom = f.geometry;
-                    if (!geom) return false;
-                    const ringsets: number[][][][] = geom.type === 'MultiPolygon'
-                        ? geom.coordinates as number[][][][]
-                        : [geom.coordinates as number[][][]];
-                    return ringsets.some(rings => this.polygonIntersectsRect(rings, bbox.lonMin, bbox.latMin, bbox.lonMax, bbox.latMax));
-                })
-                .map(f => {
-                    const name = f.properties?.Name_2023 || 'Unknown';
-                    const classId = f.properties?.Class_2023 || 0;
-                    return { name, classId, risk: LAND_COVER_RISK[name] || 'Pass-through' };
-                });
-            this.landCoverCache.set(key, features);
-            return features;
-        } catch (err) {
-            console.warn('LRIS land cover query failed:', err);
-            this.landCoverCache.set(key, null);
-            return null;
-        }
     }
 
     private async queryFireSeason(lon: number, lat: number): Promise<FireSeasonResult | null> {
@@ -381,99 +186,40 @@ export default class Task extends ETL {
         return { corroborated: neighbourCount > 0, clusterSize: neighbourCount + 1, satellites: Array.from(satellites) };
     }
 
-    private classifyDetection(
-        landCoverFeatures: LandCoverFeature[] | null,
-        frp: number,
-        acqTimeUTC: string,
-        env: Static<typeof Environment>,
-        corroboration: ClusterResult,
-        fireSeason: FireSeasonResult | null
-    ): { passThrough: boolean; riskLevel: RiskLevel; classes: LandCoverFeature[] } {
-        if (!landCoverFeatures || landCoverFeatures.length === 0) {
-            return { passThrough: true, riskLevel: 'Pass-through', classes: [] };
-        }
-
-        // Determine highest risk
-        let highest: RiskLevel = 'Pass-through';
-        for (const f of landCoverFeatures) {
-            if (RISK_PRIORITY[f.risk] > RISK_PRIORITY[highest]) highest = f.risk;
-        }
-
-        // Critical: always pass
-        if (highest === 'Critical') return { passThrough: true, riskLevel: highest, classes: landCoverFeatures };
-
-        // High: apply threshold, no overrides
-        if (highest === 'High') {
-            return { passThrough: frp > env.FRP_THRESHOLD_HIGH, riskLevel: highest, classes: landCoverFeatures };
-        }
-
-        // Ignore: filter if toggle enabled
-        if (highest === 'Ignore') {
-            return { passThrough: !env.FILTER_URBAN_HEAT, riskLevel: highest, classes: landCoverFeatures };
-        }
-
-        // Medium / Low-Grass / Low-Scrub: check overrides
-        const isNight = this.isNightTimeNZ(acqTimeUTC);
-        const isCorroborated = corroboration.corroborated;
-        const isRestricted = fireSeason && (fireSeason.season === 'Restricted' || fireSeason.season === 'Prohibited');
-
-        if (isNight || isRestricted) {
-            return { passThrough: true, riskLevel: highest, classes: landCoverFeatures };
-        }
-
-        // Corroborated Low-Grass/Low-Scrub: apply reduced FRP floor rather than bypassing entirely
-        if (isCorroborated && (highest === 'Low-Grass' || highest === 'Low-Scrub')) {
-            return { passThrough: frp > env.FRP_CORROBORATED_LOW, riskLevel: highest, classes: landCoverFeatures };
-        }
-
-        if (isCorroborated) {
-            return { passThrough: true, riskLevel: highest, classes: landCoverFeatures };
-        }
-
-        // Apply FRP threshold with fire season multiplier
-        const seasonMultiplier = (fireSeason && fireSeason.season === 'Open') ? Task.FIRE_SEASON_MULTIPLIER : 1;
-        let threshold: number;
-        if (highest === 'Medium') threshold = env.FRP_THRESHOLD_MEDIUM * seasonMultiplier;
-        else if (highest === 'Low-Scrub') threshold = env.FRP_THRESHOLD_LOW_SCRUB * seasonMultiplier;
-        else threshold = env.FRP_THRESHOLD_LOW_GRASS * seasonMultiplier;
-
-        return { passThrough: frp > threshold, riskLevel: highest, classes: landCoverFeatures };
-    }
-
     private parseKML(kmlContent: string, source: string, bbox: { minLat: number; minLon: number; maxLat: number; maxLon: number }): FireData[] {
         const fires: FireData[] = [];
         const parser = new DOMParser();
         const doc = parser.parseFromString(kmlContent, 'text/xml');
         const placemarks = doc.getElementsByTagName('Placemark');
-        
+
         const satelliteMap: Record<string, string> = {
             'MODIS_C6.1': 'MODIS',
             'VIIRS_SNPP': 'VIIRS S-NPP',
             'VIIRS_NOAA20': 'VIIRS NOAA-20',
             'VIIRS_NOAA21': 'VIIRS NOAA-21'
         };
-        
+
         console.log(`Total placemarks in ${source}:`, placemarks.length);
         let nzCount = 0;
-        
+
         for (let i = 0; i < placemarks.length; i++) {
             const placemark = placemarks[i];
             const name = placemark.getElementsByTagName('name')[0]?.textContent || '';
-            
+
             // Only process centroid points, skip footprint polygons
             if (!name.includes('Fire Detection Centroid')) continue;
-            
+
             const description = placemark.getElementsByTagName('description')[0]?.textContent || '';
             const coordinates = placemark.getElementsByTagName('coordinates')[0]?.textContent?.trim();
-            
+
             if (!coordinates) continue;
-            
+
             const [lon, lat] = coordinates.split(',').map(Number);
-            
+
             // Filter for New Zealand coordinates
             if (lon < bbox.minLon || lon > bbox.maxLon || lat < bbox.minLat || lat > bbox.maxLat) continue;
             nzCount++;
-            
+
             // Extract data from KML description
             const detectionTimeMatch = description.match(/Detection Time.*?(\d{4}-\d{2}-\d{2})\s+(\d{2}):(\d{2})/);
             const sensorMatch = description.match(/<b>Sensor: <\/b>\s*([^<]+)/);
@@ -483,18 +229,18 @@ export default class Task extends ETL {
             const dayNightMatch = description.match(/<b>Day\/Night: <\/b>\s*([^<]+)/);
             const scanMatch = description.match(/<b>Scan: <\/b>\s*([\d.]+)/);
             const trackMatch = description.match(/<b>Track: <\/b>\s*([\d.]+)/);
-            
+
             // Parse detection time
             let acq_date = new Date().toISOString().split('T')[0];
             let acq_time = '1200';
             let acq_datetime = acq_date;
-            
+
             if (detectionTimeMatch) {
                 acq_date = detectionTimeMatch[1];
                 acq_time = detectionTimeMatch[2] + detectionTimeMatch[3];
                 acq_datetime = `${acq_date}T${detectionTimeMatch[2]}:${detectionTimeMatch[3]}:00Z`;
             }
-            
+
             // Parse confidence (handle both percentage and text)
             let confidence = 60;
             if (confidenceMatch) {
@@ -509,7 +255,7 @@ export default class Task extends ETL {
                     confidence = 40;
                 }
             }
-            
+
             // Parse satellite name
             let satellite = satelliteMap[source] || source;
             if (sensorMatch) {
@@ -523,7 +269,7 @@ export default class Task extends ETL {
                     else satellite = 'VIIRS';
                 }
             }
-            
+
             const fire: FireData = {
                 latitude: lat,
                 longitude: lon,
@@ -540,10 +286,10 @@ export default class Task extends ETL {
                 confidence: confidence,
                 frp: frpMatch ? parseFloat(frpMatch[1]) : 0
             };
-            
+
             fires.push(fire);
         }
-        
+
         console.log(`NZ coordinates found in ${source}:`, nzCount, `fires parsed:`, fires.length);
         return fires;
     }
@@ -578,20 +324,20 @@ export default class Task extends ETL {
             { name: 'VIIRS_NOAA20', url: 'https://firms.modaps.eosdis.nasa.gov/api/kml_fire_footprints/australia_newzealand/24h/noaa-20-viirs-c2/FirespotArea_australia_newzealand_noaa-20-viirs-c2_24h.kmz' },
             { name: 'VIIRS_NOAA21', url: 'https://firms.modaps.eosdis.nasa.gov/api/kml_fire_footprints/australia_newzealand/24h/noaa-21-viirs-c2/FirespotArea_australia_newzealand_noaa-21-viirs-c2_24h.kmz' }
         ];
-        
+
         for (const kmlSource of kmlSources) {
             try {
                 const kmlRes = await fetch(kmlSource.url);
-                
+
                 if (!kmlRes.ok) {
                     console.warn(`KML API returned ${kmlRes.status} for ${kmlSource.name}: ${kmlRes.statusText}`);
                     continue;
                 }
-                
+
                 const kmzBuffer = await kmlRes.arrayBuffer();
                 const zip = new (AdmZip as unknown as new (buffer: Buffer) => AdmZip)(Buffer.from(kmzBuffer));
                 const entries = zip.getEntries();
-                
+
                 console.log(`KMZ entries for ${kmlSource.name}:`, entries.map((e: AdmZip.IZipEntry) => e.entryName));
                 for (const entry of entries) {
                     if (entry.entryName.endsWith('.kml')) {
@@ -607,7 +353,7 @@ export default class Task extends ETL {
                 console.error(`Error fetching ${kmlSource.name} KML:`, error);
             }
         }
-        
+
         // Deduplicate fires based on coordinates and time (use 3 decimal places for coordinate matching)
         const uniqueFires = new Map<string, FireData>();
         let duplicatesFound = 0;
@@ -629,25 +375,11 @@ export default class Task extends ETL {
 
         console.log(`Found ${allFires.length} total fire detections after deduplication`);
 
-        // Compute clusters across full batch (before filtering or ephemeral checks)
-        const maskingEnabled = env.LAND_COVER_MASKING && !!env.LRIS_API_KEY;
+        // Compute clusters across the full batch
         const clusterMap = new Map<FireData, ClusterResult>();
-        if (maskingEnabled) {
-            for (const fire of allFires) {
-                clusterMap.set(fire, this.findCluster(fire, allFires));
-            }
+        for (const fire of allFires) {
+            clusterMap.set(fire, this.findCluster(fire, allFires));
         }
-
-        // Load ephemeral state
-        let ephemeral: { assessments: Record<string, Assessment> } = { assessments: {} };
-        if (maskingEnabled) {
-            try {
-                ephemeral = await this.ephemeral(EphemeralSchema) as typeof ephemeral;
-            } catch {
-                console.warn('Ephemeral state invalid or incompatible, starting fresh');
-            }
-        }
-        if (!ephemeral.assessments) ephemeral.assessments = {};
 
         const fc = {
             type: 'FeatureCollection' as const,
@@ -660,98 +392,34 @@ export default class Task extends ETL {
         };
 
         const processedFeatures = new Map<string, typeof fc.features[number]>();
-        let filteredCount = 0;
 
-        // Process each fire detection
         for (const fire of allFires) {
             // Filter by minimum confidence and FRP
             if (fire.confidence < env.MIN_CONFIDENCE || fire.frp < env.MIN_FRP) {
                 continue;
             }
-            
+
             try {
                 const fireId = `${fire.satellite}_${fire.acq_date}_${String(fire.acq_time).padStart(4, '0')}_${fire.latitude.toFixed(3)}_${fire.longitude.toFixed(3)}`;
-                
+
                 if (processedFeatures.has(fireId)) continue;
-                
+
                 const timeStr = String(fire.acq_time).padStart(4, '0');
                 const hours = timeStr.slice(0, 2);
                 const minutes = timeStr.slice(2, 4);
                 const acqDateTimeUTC = `${fire.acq_date}T${hours}:${minutes}:00Z`;
                 const acqTime = new Date(acqDateTimeUTC);
                 const brightness2 = fire.brightness_2 || fire.brightness;
-                
+
                 const now = new Date();
                 const hoursSince = (now.getTime() - acqTime.getTime()) / (1000 * 60 * 60);
                 const timeSinceCategory = hoursSince < 1 ? '< 1' : hoursSince < 3 ? '1-3' : hoursSince < 6 ? '3-6' : hoursSince < 12 ? '6-12' : '12-24';
 
-                // Land cover masking pipeline
-                let assessment: Assessment | null = null;
-                if (maskingEnabled) {
-                    const cachedKey = `${fire.latitude.toFixed(3)}_${fire.longitude.toFixed(3)}_${fire.acq_date}_${timeStr}`;
-                    const cached = ephemeral.assessments[cachedKey];
+                const cluster = clusterMap.get(fire) || { corroborated: false, clusterSize: 1, satellites: [fire.satellite] };
 
-                    if (cached?.landCover) {
-                        // Land cover is cached but cluster must be recomputed from the current batch.
-                        // Re-derive risk from LAND_COVER_RISK by name so ephemeral entries reflect
-                        // any changes to the risk table without waiting for cache expiry.
-                        const freshClasses: LandCoverFeature[] = cached.landCover.allClasses.map(c => ({
-                            name: c.name,
-                            classId: c.classId,
-                            risk: LAND_COVER_RISK[c.name] || 'Pass-through' as RiskLevel
-                        }));
-                        const cluster = clusterMap.get(fire) || { corroborated: false, clusterSize: 1, satellites: [fire.satellite] };
-                        const classification = this.classifyDetection(
-                            freshClasses,
-                            fire.frp,
-                            acqDateTimeUTC,
-                            env,
-                            cluster,
-                            (cached.fireSeason as FireSeasonResult | null) ?? null
-                        );
-                        assessment = {
-                            ...cached as Assessment,
-                            landCover: { ...cached.landCover!, passThrough: classification.passThrough, riskLevel: classification.riskLevel, allClasses: freshClasses },
-                            cluster
-                        };
-                    } else {
-                        const pixelSize = fire.satellite.includes('VIIRS') ? 375 : 1000;
-                        const bbox = this.computeFootprintBbox(fire.latitude, fire.longitude, pixelSize);
-                        const cluster = clusterMap.get(fire) || { corroborated: false, clusterSize: 1, satellites: [fire.satellite] };
-
-                        // Query LRIS + FENZ in parallel
-                        const [landCoverFeatures, fireSeason] = await Promise.all([
-                            this.queryLandCover(bbox, env.LRIS_API_KEY!),
-                            env.FIRE_SEASON_AWARE ? this.queryFireSeason(fire.longitude, fire.latitude) : Promise.resolve(null)
-                        ]);
-
-                        const classification = this.classifyDetection(landCoverFeatures, fire.frp, acqDateTimeUTC, env, cluster, fireSeason);
-
-                        assessment = {
-                            landCover: landCoverFeatures ? {
-                                primaryClass: classification.classes.reduce((best, c) => RISK_PRIORITY[c.risk] > RISK_PRIORITY[best.risk] ? c : best, classification.classes[0])?.name || 'Unknown',
-                                classId: classification.classes.reduce((best, c) => RISK_PRIORITY[c.risk] > RISK_PRIORITY[best.risk] ? c : best, classification.classes[0])?.classId || 0,
-                                riskLevel: classification.riskLevel,
-                                passThrough: classification.passThrough,
-                                allClasses: classification.classes
-                            } : null,
-                            fireSeason,
-                            cluster,
-                            timestamp: new Date().toISOString()
-                        };
-
-                        // Only persist to ephemeral if fire season lookup succeeded (or wasn't requested)
-                        // so that failed lookups are retried on the next invocation
-                        if (!env.FIRE_SEASON_AWARE || fireSeason !== null) {
-                            ephemeral.assessments[cachedKey] = assessment;
-                        }
-                    }
-
-                    // Apply filter decision
-                    if (assessment.landCover && !assessment.landCover.passThrough) {
-                        filteredCount++;
-                        continue;
-                    }
+                let fireSeason: FireSeasonResult | null = null;
+                if (env.FIRE_SEASON_AWARE) {
+                    fireSeason = await this.queryFireSeason(fire.longitude, fire.latitude);
                 }
 
                 // Build remarks
@@ -767,31 +435,19 @@ export default class Task extends ETL {
 
                 let callsign = `FIRMS Detection - FRP: ${fire.frp}`;
 
-                if (assessment?.landCover) {
-                    const lc = assessment.landCover;
-                    const classNames = lc.allClasses.map(c => `${c.name} (Class ${c.classId})`).join(', ');
-                    remarkLines.push(`Land Cover: ${classNames}`);
-                    if (lc.allClasses.length > 1) {
-                        remarkLines.push(`Land Cover Risk: ${lc.riskLevel} (highest of ${lc.allClasses.length} classes)`);
-                    } else {
-                        remarkLines.push(`Land Cover Risk: ${lc.riskLevel}`);
-                    }
-                    callsign = `FIRMS Detection - FRP: ${fire.frp} - ${lc.primaryClass} (${lc.riskLevel})`;
+                if (cluster.corroborated) {
+                    remarkLines.push(`Corroborated: ${cluster.clusterSize} detections within 500m/2h (${cluster.satellites.join(', ')})`);
+                    callsign += ` [${cluster.clusterSize}x]`;
                 }
 
-                if (assessment?.cluster?.corroborated) {
-                    remarkLines.push(`Corroborated: ${assessment.cluster.clusterSize} detections within 500m/2h (${assessment.cluster.satellites.join(', ')})`);
-                    callsign += ` [${assessment.cluster.clusterSize}x]`;
-                }
-
-                if (assessment?.fireSeason) {
-                    const fs = assessment.fireSeason;
+                if (fireSeason) {
+                    const fs = fireSeason;
                     remarkLines.push(`Fire Season: ${fs.season} (${fs.zone}, ${fs.district})`);
                     if (fs.onDocLand) remarkLines.push('DoC Conservation Land: Yes');
                     if (fs.section52FireLandMgmt !== null) {
                         remarkLines.push(`Section 52: Fire for land management — ${fs.section52FireLandMgmt ? 'allowed' : 'prohibited'}`);
                     }
-                } else if (maskingEnabled && env.FIRE_SEASON_AWARE) {
+                } else if (env.FIRE_SEASON_AWARE) {
                     remarkLines.push('Fire Season: Lookup failed');
                 }
 
@@ -808,19 +464,11 @@ export default class Task extends ETL {
                     brightness_2: brightness2,
                     frp: fire.frp,
                     daynight: fire.daynight,
-                    version: fire.version
+                    version: fire.version,
+                    cluster_size: cluster.clusterSize
                 };
 
-                if (assessment?.landCover) {
-                    metadata.land_cover = assessment.landCover.primaryClass;
-                    metadata.land_cover_risk = assessment.landCover.riskLevel;
-                }
-                if (assessment?.cluster) {
-                    metadata.cluster_size = assessment.cluster.clusterSize;
-                }
-                if (assessment?.fireSeason) {
-                    metadata.fire_season = assessment.fireSeason.season;
-                }
+                if (fireSeason) metadata.fire_season = fireSeason.season;
 
                 const feature = {
                     id: fireId,
@@ -869,18 +517,6 @@ export default class Task extends ETL {
             }
         }
 
-        // Prune ephemeral entries older than 25 hours and save
-        if (maskingEnabled) {
-            const cutoff = Date.now() - 25 * 3600000;
-            for (const [key, entry] of Object.entries(ephemeral.assessments)) {
-                if (new Date(entry.timestamp).getTime() < cutoff) {
-                    delete ephemeral.assessments[key];
-                }
-            }
-            await this.setEphemeral(ephemeral);
-        }
-
-        if (filteredCount > 0) console.log(`Land cover masking filtered ${filteredCount} detections`);
         console.log(`ok - obtained ${fc.features.length} FIRMS fire features`);
         await this.submit(fc);
     }
@@ -890,4 +526,3 @@ await local(new Task(import.meta.url), import.meta.url);
 export async function handler(event: Event = {}) {
     return await internal(new Task(import.meta.url), event);
 }
-
