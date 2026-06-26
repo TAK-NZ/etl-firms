@@ -28,6 +28,10 @@ const Environment = Type.Object({
     FIRE_SEASON_AWARE: Type.Boolean({
         default: false,
         description: 'Enable FENZ fire season lookups to annotate detections. Uses public ArcGIS APIs (no key required).'
+    }),
+    FIRE_SEASON_CACHE_HOURS: Type.Number({
+        default: 6,
+        description: 'How long (in hours) to cache FENZ fire season results across invocations. Cached results are stored in ephemeral state and reused on cold starts to reduce API load.'
     })
 });
 
@@ -44,6 +48,20 @@ interface FireSeasonResult {
     onDocLand: boolean;
     section52FireLandMgmt: boolean | null;
 }
+
+// Persisted across Lambda invocations. Successful fire season lookups are cached for
+// FIRE_SEASON_CACHE_HOURS (configurable, default 6 hours) to avoid hammering the FENZ
+// ArcGIS APIs on every 20-second run.
+const EphemeralSchema = Type.Object({
+    fireSeasonCache: Type.Optional(Type.Record(Type.String(), Type.Object({
+        season: Type.String(),
+        zone: Type.String(),
+        district: Type.String(),
+        onDocLand: Type.Boolean(),
+        section52FireLandMgmt: Type.Union([Type.Boolean(), Type.Null()]),
+        cachedAt: Type.String()
+    })))
+});
 
 const FireDetectionSchema = Type.Object({
     satellite: Type.String({ description: 'Satellite name (MODIS, VIIRS S-NPP, VIIRS NOAA-20, VIIRS NOAA-21)' }),
@@ -90,7 +108,10 @@ export default class Task extends ETL {
     private static readonly CLUSTER_RADIUS_M = 500;
     private static readonly CLUSTER_TIME_HOURS = 2;
 
+    // In-memory cache for the current container lifetime.
+    // Pre-populated from ephemeral at the start of each control() run when FIRE_SEASON_AWARE is set.
     private fireSeasonCache = new Map<string, FireSeasonResult | null>();
+    private fireSeasonCacheTime = new Map<string, number>(); // epoch ms when each entry was fetched
 
     private createFootprintPolygon(lat: number, lon: number, pixelSize: number): [number, number][] {
         const halfSize = (pixelSize / 2) / Task.METERS_PER_DEGREE;
@@ -155,6 +176,7 @@ export default class Task extends ETL {
                 section52FireLandMgmt
             };
             this.fireSeasonCache.set(key, result);
+            this.fireSeasonCacheTime.set(key, Date.now());
             return result;
         } catch (err) {
             console.warn('FENZ fire season query failed:', err);
@@ -311,6 +333,32 @@ export default class Task extends ETL {
 
     async control(): Promise<void> {
         const env = await this.env(Environment);
+
+        // Load ephemeral state and seed the in-memory fire season cache with fresh entries.
+        // This means a cold-started container can reuse lookups from the previous run rather
+        // than re-querying every unique location on the first invocation after a restart.
+        const ephemeral = await this.ephemeral(EphemeralSchema);
+        if (!ephemeral.fireSeasonCache) ephemeral.fireSeasonCache = {};
+
+        if (env.FIRE_SEASON_AWARE) {
+            const cutoff = Date.now() - env.FIRE_SEASON_CACHE_HOURS * 60 * 60 * 1000;
+            let seeded = 0;
+            for (const [key, entry] of Object.entries(ephemeral.fireSeasonCache)) {
+                const cachedAt = new Date(entry.cachedAt).getTime();
+                if (cachedAt > cutoff && !this.fireSeasonCache.has(key)) {
+                    this.fireSeasonCache.set(key, {
+                        season: entry.season,
+                        zone: entry.zone,
+                        district: entry.district,
+                        onDocLand: entry.onDocLand,
+                        section52FireLandMgmt: entry.section52FireLandMgmt
+                    });
+                    this.fireSeasonCacheTime.set(key, cachedAt);
+                    seeded++;
+                }
+            }
+            if (seeded > 0) console.log(`FENZ cache: seeded ${seeded} entries from ephemeral`);
+        }
 
         let allFires: FireData[] = [];
 
@@ -515,6 +563,24 @@ export default class Task extends ETL {
             } catch (error) {
                 console.error(`Error processing fire detection:`, error);
             }
+        }
+
+        // Persist successful fire season lookups back to ephemeral so the next cold-started
+        // container can reuse them without re-querying. Failures (null) are intentionally
+        // excluded so they are retried after a restart. Entries older than the TTL are pruned.
+        if (env.FIRE_SEASON_AWARE) {
+            const cutoff = Date.now() - env.FIRE_SEASON_CACHE_HOURS * 60 * 60 * 1000;
+            const updatedCache: typeof ephemeral.fireSeasonCache = {};
+            for (const [key, result] of this.fireSeasonCache.entries()) {
+                if (result === null) continue;
+                const cachedAt = this.fireSeasonCacheTime.get(key);
+                if (cachedAt && cachedAt > cutoff) {
+                    updatedCache[key] = { ...result, cachedAt: new Date(cachedAt).toISOString() };
+                }
+            }
+            ephemeral.fireSeasonCache = updatedCache;
+            await this.setEphemeral(ephemeral);
+            console.log(`FENZ cache: persisted ${Object.keys(updatedCache).length} entries to ephemeral`);
         }
 
         console.log(`ok - obtained ${fc.features.length} FIRMS fire features`);
