@@ -8,7 +8,7 @@
 |---|---|---|
 | NASA FIRMS | https://firms.modaps.eosdis.nasa.gov/api/kml_fire_footprints/ | Active fire detections from multiple satellites (KMZ) |
 
-### Data Sources
+### Satellite Sources
 
 | Source | Satellite | Description |
 |---|---|---|
@@ -21,46 +21,32 @@ Data is fetched from the public Australia/New Zealand KMZ fire footprint files (
 
 ### Enrichment Sources
 
-When land cover masking and/or fire season awareness are enabled, the ETL queries additional NZ data sources:
-
 | Data Provider | API | Content | Auth |
 |---|---|---|---|
-| Manaaki Whenua / Landcare Research | [LRIS WFS](https://lris.scinfo.org.nz/) | LCDB v6.0 land cover classification | API key (free) |
 | Fire and Emergency NZ (FENZ) | [ArcGIS REST](https://www.checkitsalright.nz/) | Fire season status, DoC land, Section 52 prohibitions | None |
 
 ## Features
 
 ### Core
-- Fetches fire detections from NASA FIRMS (CSV + KML sources) across 4 satellites
+- Fetches fire detections from NASA FIRMS across 4 satellites
 - Deduplicates detections across sources, keeping highest confidence
 - Filters by minimum confidence and fire radiative power (FRP)
 - Optional fire pixel footprint polygons (375m VIIRS, 1km MODIS)
 
-### Land Cover Masking
-Classifies each detection by NZ land cover type using LCDB v6.0, enabling intelligent filtering:
-
-| Risk Level | Land Cover | Behaviour |
-|---|---|---|
-| Critical | Indigenous Forest | Always alert — bypasses all FRP filters |
-| High | Exotic Forest, Broadleaved Indigenous Hardwoods, Deciduous Hardwoods | Alert if FRP exceeds threshold |
-| Medium | Manuka/Kanuka, Matagouri, Sub Alpine Shrubland, Fernland, Flaxland | Alert if FRP exceeds threshold, or at night, or corroborated |
-| Low | Grassland, Cropland, Orchards, Gorse/Broom | Likely farm/scrub burn — filtered unless FRP is high, at night, or corroborated |
-| Ignore | Built-up Area, Transport Infrastructure, Surface Mine | Filtered when urban heat filter is enabled |
-
 ### Detection Clustering
-Scans the detection batch for nearby fires (within 500m / 2 hours). Corroborated detections — where multiple pixels or satellite passes confirm the same fire — bypass FRP thresholds for Medium risk land cover, and apply a reduced FRP floor (`FRP_CORROBORATED_LOW`) for Low-Grass/Low-Scrub rather than bypassing the threshold entirely. This prevents clusters of adjacent farm burns from being mistaken for a wildfire.
+Scans the detection batch for nearby fires (within 500m / 2 hours). Corroborated detections — where multiple pixels or satellite passes confirm the same fire — are flagged in remarks and included in the `cluster_size` output field.
 
 ### Fire Season Awareness
 Queries FENZ fire season status for each detection location:
-- **Open** season: raises FRP thresholds by 1.5× for low-risk land (farmers are legally burning)
-- **Restricted/Prohibited** season: bypasses FRP thresholds for low-risk land (any fire is suspicious)
-- Includes DoC conservation land upgrade (Open → Restricted) and Section 52 activity-specific prohibitions
+- **Restricted/Prohibited** season: detections are annotated accordingly
+- Includes DoC conservation land status and Section 52 activity-specific prohibition data
 
-### Night-time Override
-Detections between 9 PM – 6 AM NZST/NZDT on Medium/Low risk land bypass FRP thresholds. Farmers don't burn at night.
+### Land Cover Masking _(temporarily disabled)_
+Land cover masking using the LCDB v6.0 dataset has been removed pending re-implementation using an offline, S3-hosted copy of the dataset. The previous implementation queried the LRIS WFS API on every detection, which generated unsustainable load on the Koordinates-hosted infrastructure.
 
-### Ephemeral State
-Assessments (land cover, fire season, clustering) are cached across Lambda invocations. Since FIRMS reports the same detection for up to 24 hours, this avoids redundant API calls on subsequent polling cycles.
+The planned replacement approach — pre-processed FlatGeobuf file, module-level R-tree index, zero external API calls at runtime — is documented in [`docs/offline-land-cover-masking.md`](docs/offline-land-cover-masking.md).
+
+Until that work is complete, all detections pass through unfiltered.
 
 ## Example Data
 
@@ -131,20 +117,12 @@ When the ETL is deployed the `ETL_API` and `ETL_LAYER` variables will be provide
 ```bash
 export ETL_API="http://localhost:5001"
 export ETL_LAYER="19"
-export MAP_KEY="your-nasa-firms-map-key"  # optional, no longer used
 export BBOX="-47.3,166.3,-34.4,178.6"
 export MIN_CONFIDENCE="40"
 export MIN_FRP="10"
 export SHOW_FOOTPRINT="false"
-export LAND_COVER_MASKING="true"
-export LRIS_API_KEY="your-lris-api-key"
 export FIRE_SEASON_AWARE="true"
-export FILTER_URBAN_HEAT="true"
 ```
-
-Get your NASA FIRMS Map Key from: https://firms.modaps.eosdis.nasa.gov/api/
-
-Get your LRIS API Key (free) from: https://lris.scinfo.org.nz/ (requires access to layer-123148, LCDB v6.0)
 
 ### Configuration Reference
 
@@ -153,17 +131,9 @@ Get your LRIS API Key (free) from: https://lris.scinfo.org.nz/ (requires access 
 | `MAP_KEY` | — | — | No longer used (CSV sources removed). Kept for backward compatibility. |
 | `BBOX` | `-47.3,166.3,-34.4,178.6` | (default) | Bounding box: minLat,minLon,maxLat,maxLon |
 | `MIN_CONFIDENCE` | `50` | `40` | Minimum confidence %. Lower to include borderline detections that clustering can validate. |
-| `MIN_FRP` | `20` | `10` | Minimum FRP (MW). Set low and let land cover thresholds handle filtering per risk level. At 5 MW too many post-harvest forestry burns pass through. |
-| `SHOW_FOOTPRINT` | `false` | `false` | Show fire pixel footprint polygon on map |
-| `LAND_COVER_MASKING` | `false` | `true` | Enable LCDB v6.0 land cover classification. Requires `LRIS_API_KEY`. |
-| `LRIS_API_KEY` | — | — | LRIS API key for land cover lookups. Free at https://lris.scinfo.org.nz/ |
-| `FRP_THRESHOLD_HIGH` | `10` | `10` | Min FRP (MW) for High risk classes (Broadleaved Hardwoods) |
-| `FRP_THRESHOLD_MEDIUM` | `25` | `20` | Min FRP (MW) for Medium risk classes (Manuka/Kanuka, Scrub) |
-| `FRP_THRESHOLD_LOW_SCRUB` | `30` | `30` | Min FRP (MW) for Gorse/Broom |
-| `FRP_THRESHOLD_LOW_GRASS` | `40` | `35` | Min FRP (MW) for Grassland/Cropland |
-| `FRP_CORROBORATED_LOW` | `20` | `20` | Min FRP (MW) for corroborated Low-Grass/Low-Scrub detections. Replaces the full threshold when a detection is confirmed by nearby pixels or a second satellite pass. Set to `0` to allow any corroborated Low detection through. |
-| `FILTER_URBAN_HEAT` | `false` | `true` | Filter out detections on urban land cover |
-| `FIRE_SEASON_AWARE` | `false` | `true` | Enable FENZ fire season lookups (no key required) |
+| `MIN_FRP` | `20` | `10` | Minimum FRP (MW). |
+| `SHOW_FOOTPRINT` | `false` | `false` | Show fire pixel footprint polygon on map. |
+| `FIRE_SEASON_AWARE` | `false` | `true` | Enable FENZ fire season lookups (no key required). |
 
 To run the task, ensure the local [CloudTAK](https://github.com/TAK-NZ/CloudTAK/) server is running and then run with typescript runtime
 or build to JS and run natively with node
