@@ -2,7 +2,7 @@
     "name": "etl-firms",
     "type": "module",
     "prviate": true,
-    "version": "1.0.3",
+    "version": "1.2.3",
     "description": "",
     "main": "index.js",
     "scripts": {
@@ -17,16 +17,16 @@
         "@types/adm-zip": "^0.5.8",
         "@types/jsonwebtoken": "^9.0.10",
         "@types/object-hash": "^3.0.6",
-        "eslint": "^10.0.3",
+        "eslint": "^10.6.0",
         "ts-node": "^10.9.2",
-        "typescript": "^5.9.3",
-        "typescript-eslint": "^8.57.1"
+        "typescript": "^6.0.3",
+        "typescript-eslint": "^8.62.1"
     },
     "dependencies": {
-        "@sinclair/typebox": "^0.34.48",
-        "@tak-ps/etl": "^10.4.0",
-        "@xmldom/xmldom": "^0.8.11",
-        "adm-zip": "^0.5.16",
+        "@sinclair/typebox": "^0.34.49",
+        "@tak-ps/etl": "^10.8.0",
+        "@xmldom/xmldom": "^0.9.10",
+        "adm-zip": "^0.5.18",
         "object-hash": "^3.0.0"
     }
 }
