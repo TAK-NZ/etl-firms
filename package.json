@@ -24,9 +24,9 @@
     },
     "dependencies": {
         "@sinclair/typebox": "^0.34.49",
-        "@tak-ps/etl": "^10.8.0",
+        "@tak-ps/etl": "^10.22.2",
         "@xmldom/xmldom": "^0.9.10",
-        "adm-zip": "^0.5.18",
+        "adm-zip": "^0.6.1",
         "object-hash": "^3.0.0"
     }
 }
