@@ -11,6 +11,7 @@
 ## Version History
 
 ### v1.3.0
+- :bug: Add `.dockerignore` so locally built images no longer bundle git-ignored local files. A stale `dist/.env` (`ETL_API=http://localhost:5001`) was copied into the image by `deploy-etl.sh` and overrode the Lambda's `ETL_API`/`ETL_LAYER` at runtime, causing `fetch failed`
 - :tada: Add `capabilities.json` manifest (validated against `@tak-ps/etl`'s `StaticCapabilitiesSchema`) declaring the `feature:*` permission, compute (1024 MB / 300 s) and a `rate(1 minute)` schedule, embedded in the pushed image as the `com.cloudtak.capabilities` OCI annotation via `docker buildx` in CI. The existing CloudFormation-export ECR lookup is kept; the `cloudtak-etl` CLI is not used because it hardcodes `tak-vpc-<Environment>-cloudtak-tasks`
 - :white_check_mark: Add basic test suite (`npm test`) covering static config, Input/Output schemas and the capabilities manifest
 - :rocket: Switch to `Task.init()` for local-dev `ETL_TOKEN` auto-generation (no behavior change in Lambda)
