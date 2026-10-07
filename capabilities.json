@@ -1,0 +1,27 @@
+{
+    "version": "1.0",
+    "name": "NASA FIRMS Fire Detections (NZ)",
+    "description": "Ingests NASA FIRMS active fire detections (MODIS and VIIRS S-NPP/NOAA-20/NOAA-21 KMZ feeds) for a configurable New Zealand bounding box, clusters and filters them by confidence and fire radiative power, optionally annotates them with FENZ fire season status, and posts them to the map.",
+    "compute": {
+        "memory": 1024,
+        "timeout": 300
+    },
+    "permissions": [
+        {
+            "resource": "feature:*",
+            "required": true,
+            "description": "Submits fire detection CoT features to CloudTAK"
+        }
+    ],
+    "invocations": {
+        "incoming": {
+            "schedule": {
+                "description": "Polls the NASA FIRMS 24h KMZ feeds for new fire detections on a schedule.",
+                "default": {
+                    "enabled": true,
+                    "schedule": "rate(1 minute)"
+                }
+            }
+        }
+    }
+}
