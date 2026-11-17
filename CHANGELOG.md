@@ -10,6 +10,12 @@
 
 ## Version History
 
+### v1.3.1
+- :bug: Detection footprints now expire. They were sent as `u-d-f` drawings, which ATAK never expires. They are now sent with the detection point's marker type (`a-f-X-i`), so CloudTAK (`@tak-ps/node-cot` >= 14.58.0) converts them into a marker CoT with a `<shape><polyline>` and ATAK removes the footprint together with the marker at `stale`
+- :bug: The footprint marker is invisible (`marker-color` with `marker-opacity: 0`, written as `<color argb>` with alpha 0), otherwise ATAK draws an unknown-type "?" on it. It must not carry an `icon`: a valid `usericon` makes ATAK move the marker to another map group, which deletes the polygon it owns. The fire icon stays on the detection point at the footprint's centre
+- :rocket: The footprint sets no `stale` itself, like the detection point, so both take the layer's stale setting. Check that the layer applies it to polygons as well as points, otherwise the footprint gets node-cot's 20 second default
+- :white_check_mark: Test the footprint feature and its conversion through `CoTParser.from_geojson` (adds `@tak-ps/node-cot` as a devDependency)
+- :arrow_up: `npm audit fix`, `npm audit` reports 0 vulnerabilities
 ### v1.3.0
 - :bug: Add `.dockerignore` so locally built images no longer bundle git-ignored local files. A stale `dist/.env` (`ETL_API=http://localhost:5001`) was copied into the image by `deploy-etl.sh` and overrode the Lambda's `ETL_API`/`ETL_LAYER` at runtime, causing `fetch failed`
 - :tada: Add `capabilities.json` manifest (validated against `@tak-ps/etl`'s `StaticCapabilitiesSchema`) declaring the `feature:*` permission, compute (1024 MB / 300 s) and a `rate(1 minute)` schedule, embedded in the pushed image as the `com.cloudtak.capabilities` OCI annotation via `docker buildx` in CI. The existing CloudFormation-export ECR lookup is kept; the `cloudtak-etl` CLI is not used because it hardcodes `tak-vpc-<Environment>-cloudtak-tasks`
