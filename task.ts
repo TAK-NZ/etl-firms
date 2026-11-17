@@ -98,6 +98,62 @@ interface FireData {
     daynight: string;
 }
 
+/**
+ * Properties that make a polygon marker invisible in ATAK.
+ *
+ * CloudTAK (node-cot >= 14.58.0) turns a Polygon with a marker `type` into a
+ * marker CoT with a `<shape><polyline>`. ATAK removes the polygon together
+ * with that marker once `stale` passes, unlike a `u-d-f` drawing, which never
+ * expires. The marker has no icon, so ATAK would draw an unknown-type "?" on
+ * it: alpha 0 (`<color argb>`) hides that.
+ *
+ * Do NOT give the polygon an `icon`: a valid `usericon` makes ATAK move the
+ * marker to another map group, which deletes the polygon it owns. The icon
+ * stays on the separate detection point at the footprint's centre.
+ */
+export const HIDDEN_MARKER_PROPERTIES = {
+    'marker-color': '#808080',
+    'marker-opacity': 0
+} as const;
+
+/** Same marker type as the detection point, not a `u-*` drawing type */
+export const FOOTPRINT_TYPE = 'a-f-X-i';
+
+/**
+ * The satellite pixel footprint of a detection. Its `stale` is deliberately
+ * not set here: like the detection point it takes the layer's stale setting,
+ * so the footprint and the point expire together
+ */
+export function footprintFeature(opts: {
+    fireId: string;
+    satellite: string;
+    acqTime: Date;
+    pixelSize: number;
+    metadata: Record<string, unknown>;
+    remarks: string;
+    ring: [number, number][];
+}) {
+    const { fireId, satellite, acqTime, pixelSize, metadata, remarks, ring } = opts;
+    return {
+        id: `${fireId}_footprint`,
+        type: 'Feature' as const,
+        properties: {
+            callsign: `FIRMS Footprint - ${satellite}`,
+            type: FOOTPRINT_TYPE,
+            ...HIDDEN_MARKER_PROPERTIES,
+            time: acqTime.toISOString(),
+            start: acqTime.toISOString(),
+            metadata: { ...metadata, pixel_size: pixelSize, parent_id: fireId },
+            remarks,
+            archived: false
+        },
+        geometry: {
+            type: 'Polygon' as const,
+            coordinates: [ring]
+        }
+    };
+}
+
 export default class Task extends ETL {
     static name = 'etl-firms';
     static flow = [ DataFlowType.Incoming ];
@@ -542,23 +598,15 @@ export default class Task extends ETL {
 
                 if (env.SHOW_FOOTPRINT) {
                     const pixelSize = fire.satellite.includes('VIIRS') ? 375 : 1000;
-                    fc.features.push({
-                        id: `${fireId}_footprint`,
-                        type: 'Feature' as const,
-                        properties: {
-                            callsign: `FIRMS Footprint - ${fire.satellite}`,
-                            type: 'u-d-f',
-                            time: acqTime.toISOString(),
-                            start: acqTime.toISOString(),
-                            metadata: { ...metadata, pixel_size: pixelSize, parent_id: fireId },
-                            remarks,
-                            archived: false
-                        },
-                        geometry: {
-                            type: 'Polygon' as const,
-                            coordinates: [this.createFootprintPolygon(fire.latitude, fire.longitude, pixelSize)]
-                        }
-                    });
+                    fc.features.push(footprintFeature({
+                        fireId,
+                        satellite: fire.satellite,
+                        acqTime,
+                        pixelSize,
+                        metadata,
+                        remarks,
+                        ring: this.createFootprintPolygon(fire.latitude, fire.longitude, pixelSize)
+                    }));
                 }
             } catch (error) {
                 console.error(`Error processing fire detection:`, error);
