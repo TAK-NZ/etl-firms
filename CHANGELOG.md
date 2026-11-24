@@ -10,6 +10,9 @@
 
 ## Version History
 
+### v1.3.2
+- :arrow_up: Update `@tak-ps/etl` to `^11.4.0`. CloudTAK v14 requires ETLs to be on ETL-Base v11 or higher. v11 publishes Output schemas as named schemas, so this task needed no change for that, and the release also works with CloudTAK v13
+- :arrow_up: Update the other dependencies within their existing ranges, which clears the `npm audit --production` findings that the deploy workflow checks
 ### v1.3.1
 - :bug: Detection footprints now expire. They were sent as `u-d-f` drawings, which ATAK never expires. They are now sent with the detection point's marker type (`a-f-X-i`), so CloudTAK (`@tak-ps/node-cot` >= 14.58.0) converts them into a marker CoT with a `<shape><polyline>` and ATAK removes the footprint together with the marker at `stale`
 - :bug: The footprint marker is invisible (`marker-color` with `marker-opacity: 0`, written as `<color argb>` with alpha 0), otherwise ATAK draws an unknown-type "?" on it. It must not carry an `icon`: a valid `usericon` makes ATAK move the marker to another map group, which deletes the polygon it owns. The fire icon stays on the detection point at the footprint's centre
